@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ok Cloud | Desktop Client</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        bgMain: '#0f0f0f',      
+                        bgPanel: '#000000',     
+                        bgCard: '#1a1a1a',      
+                        borderDark: '#2a2a2a',
+                        
+                        brandOrange: '#ff5500', 
+                        brandOrangeHover: '#e64d00',
+                        brandOrangeBg: '#3a1e12', 
+                        successGreen: '#10b981',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { background-color: transparent; overflow: hidden; user-select: none; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        
+        .nav-item.active {
+            background-color: #3f1808; 
+            color: #ff7638; 
+            border-right: 4px solid #ff5500;
+        }
+        
+        .nav-item { color: #9ca3af; }
+        .nav-item:hover:not(.active) { color: #fff; background-color: #1a1a1a; }
+
+        .btn-upload {
+            background-color: #ff5500;
+            color: white;
+            box-shadow: 0 2px 8px rgba(255, 85, 0, 0.3);
+        }
+        .btn-upload:hover { 
+            background-color: #ff6a00;
+            box-shadow: 0 4px 12px rgba(255, 85, 0, 0.4);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #ff5500 0%, #e64d00 100%);
+            color: white;
+        }
+        .btn-primary:hover {
+            filter: brightness(1.1);
+            box-shadow: 0 0 20px rgba(255, 85, 0, 0.3);
+        }
+
+        .fade-enter { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .avatar-group { display: flex; -space-x-2: -0.5rem; }
+        .avatar-group img { border: 2px solid #1a1a1a; }
+
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            100% { transform: scale(2); opacity: 0; }
+        }
+        .pulse-ring::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; right: 0; bottom: 0;
+            border-radius: 50%;
+            border: 2px solid #ff5500;
+            animation: pulse-ring 2s infinite;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center h-screen bg-black font-sans text-white">
+
+    <div class="w-full h-full bg-bgMain flex overflow-hidden relative">
+        
+        <!-- ================= SETUP SCENE ================= -->
+        <div id="scene-setup" class="w-full h-full flex flex-col relative z-50 bg-bgMain">
+            <div class="h-16 flex items-center px-6 select-none">
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xl font-bold tracking-tight text-white">OK</span>
+                    <span class="text-xl font-light text-gray-500">|</span>
+                    <span class="text-xl font-bold tracking-tight text-white">CLOUD</span>
+                </div>
+            </div>
+
+            <div class="flex-1 flex items-center justify-center p-8">
+                <!-- Step 1: Authentication -->
+                <div id="wizard-step-1" class="w-full max-w-md fade-enter">
+                    <div class="text-center mb-10">
+                        <div class="w-24 h-24 bg-bgPanel rounded-full mx-auto flex items-center justify-center mb-6 shadow-2xl border border-borderDark relative group">
+                            <i class="fa-brands fa-chrome text-4xl text-gray-500 group-hover:text-brandOrange transition-colors duration-300"></i>
+                            <div class="absolute bottom-0 right-0 w-8 h-8 bg-bgMain rounded-full flex items-center justify-center border border-borderDark">
+                                <i class="fa-solid fa-arrow-up-right-from-square text-xs text-brandOrange"></i>
+                            </div>
+                        </div>
+                        <h1 class="text-3xl font-bold mb-3 tracking-tight text-white">Welcome to Ok Cloud</h1>
+                        <p class="text-gray-400">Secure & Fast Storage.</p>
+                    </div>
+                    
+                    <!-- Initial Button State -->
+                    <div id="auth-initial" class="flex justify-center fade-enter">
+                        <button onclick="startBrowserAuth()" class="btn-primary w-full max-w-xs py-3.5 rounded-lg font-bold text-sm flex items-center justify-center gap-3 shadow-lg transform transition hover:-translate-y-0.5">
+                            <span>Sign in with Browser</span> <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                        </button>
+                    </div>
+
+                    <!-- Waiting State (Restored) -->
+                    <div id="auth-waiting" class="hidden text-center space-y-6 fade-enter">
+                        <div class="relative w-16 h-16 mx-auto pulse-ring">
+                            <div class="w-16 h-16 rounded-full bg-bgPanel border border-brandOrange/50 flex items-center justify-center relative z-10">
+                                <i class="fa-solid fa-circle-notch fa-spin text-brandOrange text-xl"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="text-white font-medium" id="auth-status">Opening browser...</h3>
+                            <p class="text-xs text-gray-500 mt-1" id="auth-substatus">Redirecting to cloud.oksite.se</p>
+                            <div class="mt-4 text-xs text-gray-600 font-mono bg-bgPanel px-4 py-2 rounded border border-borderDark inline-block">
+                                Session ID: <span class="text-brandOrange">a7f3-9d2e-4b1c</span>
+                            </div>
+                        </div>
+                        <button onclick="resetAuth()" class="text-xs text-gray-500 hover:text-white underline">Cancel</button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Folder Config -->
+                <div id="wizard-step-2" class="w-full max-w-lg hidden">
+                    <div class="text-center mb-10">
+                        <div class="w-16 h-16 bg-bgPanel rounded-2xl mx-auto flex items-center justify-center mb-6 shadow-lg border border-borderDark">
+                            <i class="fa-solid fa-folder-tree text-3xl text-brandOrange"></i>
+                        </div>
+                        <h1 class="text-3xl font-bold mb-3 tracking-tight">Sync Location</h1>
+                    </div>
+                    <div class="bg-bgPanel border border-borderDark rounded-xl p-6 mb-8">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-semibold text-gray-500 uppercase">Local Path</span>
+                            <span class="text-xs text-successGreen"><i class="fa-solid fa-check mr-1"></i> Writable</span>
+                        </div>
+                        <div class="flex gap-3">
+                            <div class="flex-1 bg-[#0a0a0a] border border-borderDark rounded px-4 py-3 text-sm text-gray-300 font-mono truncate">C:\Users\Admin\Ok Cloud</div>
+                            <button class="bg-[#1a1a1a] hover:bg-[#252525] text-gray-300 border border-borderDark px-4 rounded text-sm font-medium transition">Change</button>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <button onclick="nextStep(1)" class="text-gray-500 hover:text-white text-sm font-medium px-4 py-2">Back</button>
+                        <button onclick="finishSetup()" class="btn-primary px-8 py-3 rounded-lg font-bold text-sm flex items-center gap-2"><span>Start Syncing</span> <i class="fa-solid fa-rocket"></i></button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Loading -->
+                <div id="wizard-step-3" class="w-full max-w-md text-center hidden">
+                    <div class="relative w-20 h-20 mx-auto mb-8">
+                        <div class="absolute inset-0 border-4 border-[#1a1a1a] rounded-full"></div>
+                        <div class="absolute inset-0 border-4 border-t-brandOrange rounded-full animate-spin"></div>
+                    </div>
+                    <h2 class="text-xl font-bold mb-4">Setting up...</h2>
+                    <p class="text-gray-400 text-sm mb-6" id="loading-text">Authenticating...</p>
+                    
+                    <!-- Progress Details -->
+                    <div class="bg-bgPanel border border-borderDark rounded-lg p-4 text-left space-y-3">
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="text-gray-500">Progress</span>
+                            <span class="text-brandOrange font-bold" id="sync-percentage">0%</span>
+                        </div>
+                        <div class="w-full bg-[#1a1a1a] rounded-full h-1.5">
+                            <div id="sync-progress-bar" class="bg-brandOrange h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                        </div>
+                        <div class="text-xs text-gray-600 font-mono" id="sync-details">
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-circle-notch fa-spin text-brandOrange text-xs"></i>
+                                <span id="current-file">Initializing...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= MAIN DASHBOARD ================= -->
+        <div id="scene-dashboard" class="absolute inset-0 w-full h-full bg-bgMain flex hidden">
+            
+            <!-- SIDEBAR -->
+            <div class="w-64 bg-bgPanel border-r border-borderDark flex flex-col flex-shrink-0 z-20">
+                <div class="h-16 flex flex-col justify-center px-5">
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-xl font-bold tracking-tight text-white">OK</span>
+                        <span class="text-xl font-light text-gray-500">|</span>
+                        <span class="text-xl font-bold tracking-tight text-white">CLOUD</span>
+                    </div>
+                    <div class="text-[9px] font-medium text-gray-600 uppercase tracking-wider mt-0.5">Safe Storage</div>
+                </div>
+
+                <!-- MAIN UPLOAD BUTTON -->
+                <div class="px-4 py-4">
+                    <button class="btn-upload w-full py-2.5 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-transform active:scale-95">
+                        <i class="fa-solid fa-arrow-up text-xs"></i>
+                        <span>Upload</span>
+                    </button>
+                </div>
+
+                <nav class="flex-1 space-y-1 px-2 mt-2">
+                    <a href="#" onclick="switchTab('files')" id="nav-files" class="nav-item active flex items-center gap-3 px-4 py-2.5 rounded-r-full transition-colors text-sm font-medium">
+                        <i class="fa-solid fa-cloud"></i> <span>All Files</span>
+                    </a>
+                    <a href="#" onclick="switchTab('shared')" id="nav-shared" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full transition-colors text-sm font-medium">
+                        <i class="fa-solid fa-user-group"></i> <span>Shared with me</span>
+                    </a>
+                    <a href="#" onclick="switchTab('recent')" id="nav-recent" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full transition-colors text-sm font-medium">
+                        <i class="fa-solid fa-clock-rotate-left"></i> <span>Recent</span>
+                    </a>
+                    <a href="#" onclick="switchTab('starred')" id="nav-starred" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full transition-colors text-sm font-medium">
+                        <i class="fa-regular fa-star"></i> <span>Starred</span>
+                    </a>
+                    <a href="#" onclick="switchTab('trash')" id="nav-trash" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full transition-colors text-sm font-medium">
+                        <i class="fa-regular fa-trash-can"></i> <span>Trash</span>
+                    </a>
+                    
+                    <div class="my-4 border-t border-borderDark mx-4"></div>
+                    
+                    <a href="#" onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full transition-colors text-sm font-medium">
+                        <i class="fa-solid fa-laptop-code"></i> <span>Sync Status</span>
+                    </a>
+                </nav>
+
+                <div class="p-5 mt-auto">
+                    <div class="flex items-center gap-2 mb-2 text-xs text-gray-400">
+                        <i class="fa-solid fa-database"></i> 0 B of 1 GB used
+                    </div>
+                    <div class="w-full bg-gray-800 rounded-full h-1 mb-4">
+                        <div class="bg-brandOrange h-full rounded-full w-[2%]"></div>
+                    </div>
+                    <button class="w-full border border-gray-600 rounded-full py-1.5 text-xs font-bold text-white hover:bg-gray-800 transition">Upgrade</button>
+                </div>
+            </div>
+
+            <!-- CENTER CONTENT -->
+            <div class="flex-1 flex flex-col bg-bgMain relative z-10 min-w-0">
+                <!-- Header -->
+                <div class="h-16 border-b border-borderDark flex items-center justify-between px-6 bg-bgMain">
+                    <div class="relative w-full max-w-xl group">
+                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm"></i>
+                        <input type="text" placeholder="Search files and folders" class="w-full bg-[#1a1a1a] border border-transparent rounded-lg pl-10 pr-4 py-2.5 text-sm text-gray-300 focus:outline-none focus:bg-[#222] transition-colors placeholder-gray-600">
+                    </div>
+                    <div class="flex items-center gap-4 ml-4 flex-shrink-0">
+                        <i class="fa-regular fa-bell text-gray-500 text-lg cursor-pointer hover:text-white transition"></i>
+                        <div class="flex items-center gap-2 cursor-pointer group">
+                            <div class="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-xs font-bold text-white">M</div>
+                            <span class="text-sm text-gray-400 group-hover:text-white transition">mt7393047</span>
+                            <i class="fa-solid fa-chevron-down text-gray-500 text-xs"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Title Bar -->
+                <div class="h-14 px-6 flex items-center justify-between border-b border-borderDark/50">
+                    <div class="flex items-center gap-3">
+                        <h2 id="page-title" class="text-sm font-medium text-white">All Files</h2>
+                        <i class="fa-solid fa-chevron-down text-gray-500 text-xs cursor-pointer hover:text-white transition"></i>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button class="text-gray-500 hover:text-white transition text-sm" title="Sort">
+                            <i class="fa-solid fa-arrow-down-short-wide"></i>
+                            <span class="ml-1.5 text-xs">Last modified</span>
+                        </button>
+                        <div class="bg-[#1a1a1a] rounded-md p-0.5 flex gap-0.5">
+                            <button class="p-2 rounded text-gray-500 hover:bg-[#2a2a2a] hover:text-white transition text-sm"><i class="fa-solid fa-list"></i></button>
+                            <button class="p-2 rounded bg-brandOrange/10 text-brandOrange transition text-sm"><i class="fa-solid fa-grip"></i></button>
+                        </div>
+                        <button class="text-brandOrange hover:text-brandOrangeHover transition text-lg"><i class="fa-solid fa-circle-info"></i></button>
+                    </div>
+                </div>
+
+                <!-- VIEW CONTAINER -->
+                <div class="flex-1 overflow-y-auto relative">
+                    
+                    <!-- 1. All Files View (Empty State) -->
+                    <div id="view-files" class="fade-enter h-full flex flex-col">
+                        <!-- Empty State -->
+                        <div id="files-empty" class="flex-1 flex flex-col items-center justify-center text-center">
+                            <div class="relative mb-8">
+                                <div class="w-56 h-40 relative">
+                                    <div class="absolute left-8 top-2 w-32 h-40 bg-[#1a1a1a] rounded-lg transform -rotate-12 border border-borderDark"></div>
+                                    <div class="absolute left-12 top-6 w-32 h-40 bg-[#222] rounded-lg transform -rotate-6 border border-borderDark shadow-lg"></div>
+                                    <div class="absolute left-16 top-10 w-32 h-40 bg-[#2a2a2a] rounded-lg border border-borderDark shadow-xl">
+                                        <div class="w-16 h-20 bg-brandOrange/20 rounded-br-3xl"></div>
+                                    </div>
+                                    <div onclick="toggleFilesView()" class="absolute right-4 bottom-4 bg-brandOrange rounded-full w-12 h-12 flex items-center justify-center border-4 border-bgMain shadow-[0_4px_20px_rgba(255,85,0,0.4)] cursor-pointer hover:scale-110 transition-transform z-10">
+                                        <i class="fa-solid fa-plus text-white text-lg"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <h3 class="text-base font-medium text-gray-300 mb-2">Drop files or folders here</h3>
+                            <p class="text-sm text-gray-500">Or use the <span class="text-brandOrange font-medium">"Upload"</span> button</p>
+                        </div>
+                        
+                        <div id="files-list" class="hidden p-6 space-y-1">
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 bg-[#1a1a1a]/30 hover:bg-[#1a1a1a] rounded-lg cursor-pointer items-center border border-transparent hover:border-borderDark group transition">
+                                <div class="col-span-6 flex items-center gap-3">
+                                    <i class="fa-solid fa-folder text-brandOrange text-xl"></i>
+                                    <div>
+                                        <div class="text-sm text-gray-200 group-hover:text-white font-medium">Work Files</div>
+                                        <div class="text-[10px] text-gray-500">18 items • 67.8 MB</div>
+                                    </div>
+                                </div>
+                                <div class="col-span-3 text-xs text-gray-500">2 hours ago</div>
+                                <div class="col-span-3 text-right">
+                                    <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition"><i class="fa-solid fa-ellipsis"></i></button>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 bg-[#1a1a1a]/30 hover:bg-[#1a1a1a] rounded-lg cursor-pointer items-center border border-transparent hover:border-borderDark group transition">
+                                <div class="col-span-6 flex items-center gap-3">
+                                    <i class="fa-solid fa-file-pdf text-red-500 text-xl"></i>
+                                    <div>
+                                        <div class="text-sm text-gray-200 group-hover:text-white font-medium">Budget_Report_2024.pdf</div>
+                                        <div class="text-[10px] text-gray-500">3.1 MB</div>
+                                    </div>
+                                </div>
+                                <div class="col-span-3 text-xs text-gray-500">Yesterday</div>
+                                <div class="col-span-3 text-right">
+                                    <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition"><i class="fa-solid fa-ellipsis"></i></button>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 bg-[#1a1a1a]/30 hover:bg-[#1a1a1a] rounded-lg cursor-pointer items-center border border-transparent hover:border-borderDark group transition">
+                                <div class="col-span-6 flex items-center gap-3">
+                                    <i class="fa-solid fa-image text-blue-400 text-xl"></i>
+                                    <div>
+                                        <div class="text-sm text-gray-200 group-hover:text-white font-medium">IMG_4782.png</div>
+                                        <div class="text-[10px] text-gray-500">2.3 MB</div>
+                                    </div>
+                                </div>
+                                <div class="col-span-3 text-xs text-gray-500">3 days ago</div>
+                                <div class="col-span-3 text-right">
+                                    <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition"><i class="fa-solid fa-ellipsis"></i></button>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 bg-[#1a1a1a]/30 hover:bg-[#1a1a1a] rounded-lg cursor-pointer items-center border border-transparent hover:border-borderDark group transition">
+                                <div class="col-span-6 flex items-center gap-3">
+                                    <i class="fa-solid fa-file-video text-purple-400 text-xl"></i>
+                                    <div>
+                                        <div class="text-sm text-gray-200 group-hover:text-white font-medium">Meeting_Nov_15.mp4</div>
+                                        <div class="text-[10px] text-gray-500">124.5 MB</div>
+                                    </div>
+                                </div>
+                                <div class="col-span-3 text-xs text-gray-500">Last week</div>
+                                <div class="col-span-3 text-right">
+                                    <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition"><i class="fa-solid fa-ellipsis"></i></button>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 bg-[#1a1a1a]/30 hover:bg-[#1a1a1a] rounded-lg cursor-pointer items-center border border-transparent hover:border-borderDark group transition">
+                                <div class="col-span-6 flex items-center gap-3">
+                                    <i class="fa-solid fa-file-code text-yellow-400 text-xl"></i>
+                                    <div>
+                                        <div class="text-sm text-gray-200 group-hover:text-white font-medium">app.js</div>
+                                        <div class="text-[10px] text-gray-500">12.7 KB</div>
+                                    </div>
+                                </div>
+                                <div class="col-span-3 text-xs text-gray-500">2 weeks ago</div>
+                                <div class="col-span-3 text-right">
+                                    <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition"><i class="fa-solid fa-ellipsis"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Shared View (Table) -->
+                    <div id="view-shared" class="hidden fade-enter h-full">
+                        <div class="space-y-1">
+                            <div class="grid grid-cols-12 gap-4 px-4 py-2 text-[10px] text-gray-500 uppercase font-bold tracking-wider border-b border-borderDark/50">
+                                <div class="col-span-5">Name</div>
+                                <div class="col-span-4">Shared By</div>
+                                <div class="col-span-3 text-right">Access</div>
+                            </div>
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 hover:bg-[#1a1a1a] cursor-pointer items-center border-b border-borderDark/30 group transition">
+                                <div class="col-span-5 flex items-center gap-3">
+                                    <i class="fa-solid fa-folder text-brandOrange text-lg"></i>
+                                    <div>
+                                        <div class="text-sm text-gray-200 group-hover:text-white font-medium">Sales Reports</div>
+                                        <div class="text-[10px] text-gray-500">Updated 2h ago</div>
+                                    </div>
+                                </div>
+                                <div class="col-span-4 flex items-center gap-2">
+                                    <div class="w-6 h-6 rounded-full bg-purple-600 flex items-center justify-center text-[10px] font-bold">MK</div>
+                                    <span class="text-xs text-gray-400">Mike Torres</span>
+                                </div>
+                                <div class="col-span-3 text-right">
+                                    <span class="text-[10px] bg-brandOrange/10 text-brandOrange px-2 py-1 rounded border border-brandOrange/20">Can Edit</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 hover:bg-[#1a1a1a] cursor-pointer items-center border-b border-borderDark/30 group transition">
+                                <div class="col-span-5 flex items-center gap-3">
+                                    <i class="fa-solid fa-file-powerpoint text-orange-500 text-lg"></i>
+                                    <div>
+                                        <div class="text-sm text-gray-200 group-hover:text-white font-medium">Q4_Strategy.pptx</div>
+                                        <div class="text-[10px] text-gray-500">Shared yesterday</div>
+                                    </div>
+                                </div>
+                                <div class="col-span-4 flex items-center gap-2">
+                                    <div class="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold">LR</div>
+                                    <span class="text-xs text-gray-400">Lisa Rodriguez</span>
+                                </div>
+                                <div class="col-span-3 text-right">
+                                    <span class="text-[10px] bg-gray-800 text-gray-400 px-2 py-1 rounded border border-gray-700">View Only</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Recent View -->
+                    <div id="view-recent" class="hidden fade-enter h-full">
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Today</div>
+                        <div class="space-y-1">
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 bg-[#1a1a1a]/50 hover:bg-[#1a1a1a] rounded-lg cursor-pointer items-center border border-transparent hover:border-borderDark group">
+                                <div class="col-span-6 flex items-center gap-3">
+                                    <i class="fa-solid fa-image text-blue-400 text-lg"></i>
+                                    <span class="text-sm text-gray-200">IMG_4782.png</span>
+                                </div>
+                                <div class="col-span-6 text-right text-xs text-gray-500">Edited 10 mins ago</div>
+                            </div>
+                            <div class="grid grid-cols-12 gap-4 px-4 py-3 bg-[#1a1a1a]/50 hover:bg-[#1a1a1a] rounded-lg cursor-pointer items-center border border-transparent hover:border-borderDark group">
+                                <div class="col-span-6 flex items-center gap-3">
+                                    <i class="fa-solid fa-file-code text-yellow-500 text-lg"></i>
+                                    <span class="text-sm text-gray-200">app.js</span>
+                                </div>
+                                <div class="col-span-6 text-right text-xs text-gray-500">Edited 1 hour ago</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Starred View -->
+                    <div id="view-starred" class="hidden fade-enter h-full">
+                        <div class="flex flex-col items-center justify-center h-full pb-20">
+                            <div class="w-20 h-20 bg-[#1a1a1a] rounded-full flex items-center justify-center mb-4">
+                                <i class="fa-regular fa-star text-4xl text-gray-600"></i>
+                            </div>
+                            <h3 class="text-lg font-medium text-gray-300">No starred files</h3>
+                            <p class="text-sm text-gray-500 mt-1">Add stars to things you want to find easily later.</p>
+                        </div>
+                    </div>
+
+                    <!-- 5. Trash View -->
+                    <div id="view-trash" class="hidden fade-enter h-full">
+                        <div class="flex flex-col items-center justify-center h-full pb-20">
+                            <div class="w-40 h-32 relative mb-4 opacity-80">
+                                <i class="fa-solid fa-trash-can text-6xl text-gray-700 absolute bottom-0 left-12"></i>
+                                <i class="fa-solid fa-paper-plane text-2xl text-gray-600 absolute top-0 right-10 transform rotate-12"></i>
+                            </div>
+                            <h3 class="text-lg font-medium text-gray-300">Trash is empty</h3>
+                            <p class="text-sm text-gray-500 mt-1">Items moved to trash will be deleted forever after 30 days.</p>
+                        </div>
+                    </div>
+
+                    <!-- 6. Sync Dashboard -->
+                    <div id="view-dashboard" class="hidden fade-enter h-full">
+                        <div class="flex flex-col items-center justify-center h-full pb-20">
+                            <div class="w-24 h-24 rounded-full bg-gray-900 border-2 border-brandOrange flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(255,85,0,0.2)]">
+                                <i class="fa-solid fa-check text-4xl text-brandOrange"></i>
+                            </div>
+                            <h1 class="text-2xl font-bold text-white mb-2">Everything is up to date</h1>
+                            <p class="text-gray-500">Your local folder is in sync with Ok Cloud.</p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            <!-- RIGHT DETAILS PANEL -->
+            <div class="w-80 bg-bgPanel border-l border-borderDark flex-shrink-0 flex flex-col">
+                <div class="h-16 flex items-center justify-between px-6 border-b border-borderDark">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-folder text-brandOrange text-lg"></i>
+                        <span class="text-sm font-medium text-white">All files</span>
+                    </div>
+                    <button class="text-gray-500 hover:text-white transition">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+                
+                <div class="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                    <div class="w-32 h-32 mb-6 relative">
+                        <div class="absolute inset-0 flex items-center justify-center">
+                            <div class="relative">
+                                <div class="w-24 h-20 bg-[#1a1a1a] rounded-lg border-2 border-borderDark flex items-center justify-center relative">
+                                    <i class="fa-solid fa-chart-line text-brandOrange text-2xl"></i>
+                                    <div class="absolute -top-2 -right-2 flex gap-1">
+                                        <div class="w-2 h-2 bg-brandOrange rounded-full"></div>
+                                        <div class="w-2 h-2 bg-brandOrange/50 rounded-full"></div>
+                                    </div>
+                                </div>
+                                <div class="w-12 h-3 bg-[#1a1a1a] mx-auto mt-1 rounded-b-lg border-x-2 border-b-2 border-borderDark"></div>
+                                <div class="absolute -bottom-2 -right-6 w-12 h-12 bg-bgPanel rounded-full border-2 border-borderDark flex items-center justify-center">
+                                    <i class="fa-solid fa-user text-gray-600 text-lg"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <h3 class="text-sm font-medium text-gray-300 mb-2">Select file or folder to see details</h3>
+                    <p class="text-xs text-gray-600 leading-relaxed">Click on any item to view its properties, sharing options, and more</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Setup Logic
+        function nextStep(n) {
+            ['wizard-step-1', 'wizard-step-2', 'wizard-step-3'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+            document.getElementById(`wizard-step-${n}`).classList.remove('hidden');
+            document.getElementById(`wizard-step-${n}`).classList.add('fade-enter');
+        }
+
+        function startBrowserAuth() { 
+            document.getElementById('auth-initial').classList.add('hidden');
+            document.getElementById('auth-waiting').classList.remove('hidden');
+            
+            const authSteps = [
+                { status: 'Opening browser...', substatus: 'Redirecting to cloud.oksite.se', delay: 1000 },
+                { status: 'Waiting for authentication...', substatus: 'Please sign in with your credentials', delay: 2000 },
+                { status: 'Verifying credentials...', substatus: 'Establishing secure connection', delay: 1500 },
+                { status: 'Authentication successful!', substatus: 'Preparing your workspace', delay: 800 }
+            ];
+            
+            let step = 0;
+            function runAuthStep() {
+                if (step < authSteps.length) {
+                    document.getElementById('auth-status').innerText = authSteps[step].status;
+                    document.getElementById('auth-substatus').innerText = authSteps[step].substatus;
+                    setTimeout(() => {
+                        step++;
+                        runAuthStep();
+                    }, authSteps[step].delay);
+                } else {
+                    nextStep(2);
+                }
+            }
+            runAuthStep();
+        }
+
+        function resetAuth() {
+            document.getElementById('auth-waiting').classList.add('hidden');
+            document.getElementById('auth-initial').classList.remove('hidden');
+        }
+
+        function finishSetup() {
+            nextStep(3);
+            
+            // Realistic sync flow with files
+            const syncSteps = [
+                { msg: 'Connecting to Ok Cloud...', file: 'Establishing connection', progress: 10 },
+                { msg: 'Authenticating session...', file: 'Verifying token', progress: 20 },
+                { msg: 'Fetching file list...', file: 'Loading remote index', progress: 35 },
+                { msg: 'Syncing files...', file: 'Work Files/Budget_Report_2024.pdf', progress: 50 },
+                { msg: 'Syncing files...', file: 'Photos/IMG_4782.png', progress: 65 },
+                { msg: 'Syncing files...', file: 'Videos/Meeting_Nov_15.mp4', progress: 80 },
+                { msg: 'Building local index...', file: 'Creating database', progress: 90 },
+                { msg: 'Finalizing...', file: 'All files synced successfully', progress: 100 }
+            ];
+            
+            let step = 0;
+            const interval = setInterval(() => {
+                if (step < syncSteps.length) {
+                    document.getElementById('loading-text').innerText = syncSteps[step].msg;
+                    document.getElementById('current-file').innerText = syncSteps[step].file;
+                    document.getElementById('sync-percentage').innerText = syncSteps[step].progress + '%';
+                    document.getElementById('sync-progress-bar').style.width = syncSteps[step].progress + '%';
+                    step++;
+                } else {
+                    clearInterval(interval);
+                    setTimeout(() => launchDashboard(), 500);
+                }
+            }, 600);
+        }
+        function launchDashboard() {
+            const setup = document.getElementById('scene-setup');
+            setup.style.opacity = '0';
+            setup.style.transition = 'opacity 0.5s';
+            setTimeout(() => {
+                setup.classList.add('hidden');
+                document.getElementById('scene-dashboard').classList.remove('hidden');
+                document.getElementById('scene-dashboard').classList.add('fade-enter');
+                setTimeout(() => toggleFilesView(), 1000);
+            }, 500);
+        }
+
+        // Toggle between empty state and files list
+        function toggleFilesView() {
+            document.getElementById('files-empty').classList.add('hidden');
+            document.getElementById('files-list').classList.remove('hidden');
+            updateStorageStats(208.3, 1024);
+        }
+
+
+        function updateStorageStats(usedMB, totalMB) {
+            const usedGB = (usedMB / 1024).toFixed(2);
+            const totalGB = (totalMB / 1024).toFixed(0);
+            const percentage = ((usedMB / totalMB) * 100).toFixed(1);
+            
+            const storageText = document.querySelector('.p-5.mt-auto .text-xs.text-gray-400');
+            if (storageText) {
+                storageText.innerHTML = `<i class="fa-solid fa-database"></i> ${usedGB} GB of ${totalGB} GB used`;
+            }
+            
+            const progressBar = document.querySelector('.bg-brandOrange.h-full.rounded-full');
+            if (progressBar) {
+                progressBar.style.width = percentage + '%';
+            }
+        }
+
+        // Tab Switching Logic
+        function switchTab(tab) {
+            document.querySelectorAll('.nav-item').forEach(el => {
+                el.classList.remove('active');
+                el.style.backgroundColor = '';
+                el.style.color = '';
+                el.style.borderRight = '';
+            });
+            
+            const nav = document.getElementById(`nav-${tab}`);
+            if (nav) nav.classList.add('active');
+
+            const views = ['files', 'shared', 'recent', 'starred', 'trash', 'dashboard'];
+            views.forEach(v => document.getElementById(`view-${v}`).classList.add('hidden'));
+
+            const selectedView = document.getElementById(`view-${tab}`);
+            if (selectedView) selectedView.classList.remove('hidden');
+
+            const titles = {
+                'files': 'All Files', 'shared': 'Shared with me', 'recent': 'Recent Files',
+                'starred': 'Starred', 'trash': 'Trash', 'dashboard': 'Sync Status'
+            };
+            document.getElementById('page-title').innerText = titles[tab] || 'Ok Cloud';
+        }
+    </script>
+</body>
+</html>
