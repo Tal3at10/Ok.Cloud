@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Ok Cloud Client</title>
+    <base href="/" />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        bgMain: '#0f0f0f',
+                        bgPanel: '#000000',
+                        bgCard: '#1a1a1a',
+                        borderDark: '#2a2a2a',
+                        brandOrange: '#ff5500',
+                        brandOrangeHover: '#e64d00',
+                        brandOrangeBg: '#3a1e12',
+                        successGreen: '#10b981',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <link href="css/app.css" rel="stylesheet" />
+    <link href="OkCloud.Client.styles.css" rel="stylesheet" />
+</head>
+
+<body class="bg-black">
+    <div id="app">Loading...</div>
+    <script src="_framework/blazor.webview.js"></script>
+</body>
+</html>

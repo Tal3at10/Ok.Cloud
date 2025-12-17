@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="OkCloud.Client.LoginPage"
+             Title="Log in to Ok Cloud"
+             BackgroundColor="#0f0f0f">
+
+    <Grid>
+        <!-- WebView للتسجيل -->
+        <WebView x:Name="LoginWebView" 
+                 Navigated="LoginWebView_Navigated"
+                 Navigating="LoginWebView_Navigating"
+                 VerticalOptions="FillAndExpand" 
+                 HorizontalOptions="FillAndExpand" />
+
+        <!-- مؤشر التحميل -->
+        <ActivityIndicator x:Name="LoadingSpinner" 
+                           IsRunning="True" 
+                           IsVisible="True"
+                           HorizontalOptions="Center" 
+                           VerticalOptions="Center" 
+                           Color="#ff5500"/>
+        
+        <!-- Back Button (top-left corner) -->
+        <Button x:Name="BackButton"
+                Text="← Back"
+                IsVisible="True"
+                BackgroundColor="Transparent"
+                TextColor="#999"
+                FontSize="14"
+                BorderWidth="1"
+                BorderColor="#333"
+                CornerRadius="8"
+                Padding="15,8"
+                HorizontalOptions="Start"
+                VerticalOptions="Start"
+                Margin="20,20,0,0"
+                Clicked="OnBackClicked"/>
+        
+        <!-- زر الإغلاق اليدوي - يظهر دائماً في الأعلى -->
+        <Button x:Name="CloseButton"
+                Text="✓ I'm Logged In - Continue"
+                IsVisible="False"
+                BackgroundColor="#ff5500"
+                TextColor="White"
+                FontAttributes="Bold"
+                FontSize="14"
+                CornerRadius="8"
+                Padding="20,10"
+                HorizontalOptions="Center"
+                VerticalOptions="Start"
+                Margin="0,20,0,0"
+                Clicked="ContinueButton_Clicked"/>
+        
+        <!-- Manual Continue Button (appears after successful login) -->
+        <Button x:Name="ContinueButton"
+                Text="✓ Continue to App"
+                IsVisible="False"
+                BackgroundColor="#ff5500"
+                TextColor="White"
+                FontAttributes="Bold"
+                CornerRadius="8"
+                Padding="20,12"
+                HorizontalOptions="Center"
+                VerticalOptions="End"
+                Margin="0,0,0,40"
+                Clicked="ContinueButton_Clicked"/>
+    </Grid>
+</ContentPage>

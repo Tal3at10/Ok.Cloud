@@ -1,0 +1,4353 @@
+@page "/"
+@using OkCloud.Client.Services
+@using OkCloud.Client.Models
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@using Microsoft.JSInterop
+@implements IDisposable
+@inject IJSRuntime JS
+@inject ApiService Api
+@inject OfflineManager OfflineMgr
+@inject FileWatcherService FileWatcher
+@inject SyncService SyncService
+
+<style>
+    body { background-color: transparent; overflow: hidden; user-select: none; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    .hidden { display: none !important; }
+    .nav-item.active { background-color: #3f1808; color: #ff7638; border-right: 4px solid #ff5500; }
+    .nav-item { color: #9ca3af; }
+    .nav-item:hover:not(.active) { color: #fff; background-color: #1a1a1a; }
+    .fade-enter { animation: fadeIn 0.4s ease-out forwards; }
+    @@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @@keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 0.5; } 100% { transform: scale(2); opacity: 0; } }
+    .pulse-ring::before { content: ''; position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: 50%; border: 2px solid #ff5500; animation: pulse-ring 2s infinite; }
+    .file-row:hover .file-actions { opacity: 1; }
+    .file-row.selected { background-color: #2a1a0f !important; border-left: 4px solid #ff5500; }
+    .file-row:hover { background-color: #1a1a1a !important; }
+    .checkbox-custom { accent-color: #ff5500; width: 18px; height: 18px; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+    .file-row:hover .checkbox-custom, .file-row.selected .checkbox-custom, .has-selection .checkbox-custom { opacity: 1; }
+
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; cursor: default; }
+    .modal-content { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 24px; min-width: 320px; }
+    #user-menu { z-index: 9999 !important; }
+    button, .cursor-pointer, a[href], input[type="button"], input[type="submit"] { cursor: pointer !important; }
+    input[type="text"], input[type="email"], input[type="password"], textarea { cursor: text !important; }
+    .nav-item, .file-row { cursor: pointer !important; }
+    
+    /* Responsive Design */
+    #sidebar { transition: transform 0.3s ease; }
+    #sidebar.collapsed { transform: translateX(-100%); }
+    
+    /* Force compact file rows - override inline classes */
+    .file-row.grid.grid-cols-12.gap-4.py-3 {
+        padding-top: 0.75rem;
+        padding-bottom: 0.75rem;
+    }
+    
+    /* Mobile & Tablet Responsive Styles */
+    @@media (max-width: 1024px) {
+        /* Sidebar becomes overlay on smaller screens */
+        #sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            z-index: 50;
+            transform: translateX(-100%);
+        }
+        
+        #sidebar.show {
+            transform: translateX(0);
+            box-shadow: 4px 0 12px rgba(0,0,0,0.5);
+        }
+        
+        /* Hide sidebar toggle on large screens */
+        #sidebar-toggle {
+            display: block !important;
+        }
+        
+        /* Adjust file list columns for smaller screens */
+        #list-header {
+            grid-template-columns: 1fr auto !important;
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        
+        #list-header > div:nth-child(2),
+        #list-header > div:nth-child(3) {
+            display: none;
+        }
+        
+        .file-row {
+            grid-template-columns: 1fr auto !important;
+        }
+        
+        .file-row > div:nth-child(2),
+        .file-row > div:nth-child(3) {
+            display: none !important;
+        }
+        
+        /* Stack toolbar buttons vertically on very small screens */
+        .flex.items-center.gap-4 {
+            flex-wrap: wrap;
+        }
+    }
+    
+    @@media (max-width: 768px) {
+        /* Hide user name on mobile */
+        #user-name {
+            display: none !important;
+        }
+        
+        /* Make search bar full width on mobile */
+        .max-w-md {
+            max-width: 100% !important;
+        }
+        
+        /* Reduce padding on mobile */
+        .px-6 {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        
+        /* Reduce toolbar padding */
+        .py-3 {
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+        }
+        
+        /* Hide "Back" button text, show only icon */
+        #back-button span {
+            display: none;
+        }
+        
+        /* Simplify breadcrumbs on mobile */
+        #breadcrumbs-container button span {
+            max-width: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        /* Make modals full width on mobile */
+        .modal-content {
+            min-width: 90vw !important;
+            max-width: 90vw !important;
+        }
+        
+        /* Compact header */
+        .h-16 {
+            height: 3rem !important;
+        }
+    }
+    
+    @@media (max-width: 480px) {
+        /* Extra small screens - further simplifications */
+        .file-row .text-sm {
+            font-size: 0.8rem;
+        }
+        
+        /* View toggle buttons removed */
+        
+        /* Make toolbar more compact */
+        .h-16 {
+            height: 3.5rem !important;
+        }
+    }
+    
+    /* Compact file rows on smaller screens */
+    @@media (max-width: 1024px) {
+        /* Ultra-specific selector to override inline classes */
+        div.file-row.grid.grid-cols-12.gap-4.py-3.px-6,
+        .file-row {
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+            min-height: auto !important;
+            gap: 0.75rem !important;
+        }
+        
+        .file-row .text-sm {
+            font-size: 0.875rem !important;
+        }
+        
+        .file-row i.fa-solid {
+            font-size: 1rem !important;
+        }
+        
+        .file-row .text-xs {
+            font-size: 0.7rem !important;
+        }
+    }
+    
+    @@media (max-width: 768px) {
+        /* Ultra-specific selector to override inline classes */
+        div.file-row.grid.grid-cols-12.gap-4.py-3.px-6,
+        .file-row {
+            padding-top: 0.375rem !important;
+            padding-bottom: 0.375rem !important;
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+            gap: 0.5rem !important;
+            min-height: auto !important;
+        }
+        
+        .file-row .text-sm {
+            font-size: 0.75rem !important;
+            line-height: 1.2 !important;
+        }
+        
+        .file-row i.fa-solid {
+            font-size: 0.875rem !important;
+        }
+        
+        .file-row .text-xs {
+            font-size: 0.65rem !important;
+        }
+        
+        /* Reduce gap between file name and icon */
+        .file-row .flex.items-center.gap-3 {
+            gap: 0.5rem !important;
+        }
+        
+        /* Make star icon smaller */
+        .file-row .fa-star {
+            font-size: 0.65rem !important;
+        }
+        
+        /* Compact buttons */
+        .file-row button {
+            padding: 0.25rem !important;
+        }
+    }
+    
+    @@media (max-width: 480px) {
+        /* Ultra-specific selector to override inline classes */
+        div.file-row.grid.grid-cols-12.gap-4.py-3.px-6,
+        .file-row {
+            padding-top: 0.25rem !important;
+            padding-bottom: 0.25rem !important;
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+            gap: 0.25rem !important;
+        }
+        
+        .file-row .text-sm {
+            font-size: 0.7rem !important;
+        }
+        
+        .file-row i.fa-solid {
+            font-size: 0.75rem !important;
+        }
+    }
+    
+    /* Sidebar overlay backdrop */
+    #sidebar-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 40;
+    }
+    
+    #sidebar-backdrop.show {
+        display: block;
+    }
+    
+    /* Workspace-specific styles */
+    .workspace-item.active {
+        background-color: #2a2a2a;
+    }
+    
+    .workspace-item .manage-button {
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+    
+    .workspace-item:hover .manage-button {
+        opacity: 1;
+    }
+    
+    /* Workspace menu positioning */
+    #workspace-menu {
+        bottom: auto;
+        max-height: 60vh;
+        margin-bottom: 1rem;
+    }
+    
+    /* Ensure workspace menu doesn't get cut off at bottom */
+    .workspace-section {
+        position: relative;
+    }
+    
+    /* Login screen responsive */
+    @@media (max-height: 600px) {
+        /* Make login screen scrollable on short windows */
+        #scene-setup .flex-1 {
+            align-items: flex-start !important;
+            padding-top: 2rem !important;
+        }
+        
+        #wizard-step-1 {
+            margin-bottom: 2rem;
+        }
+    }
+    
+    @@media (max-width: 480px) {
+        /* Adjust login form on small screens */
+        #wizard-step-1 {
+            padding: 0 1rem;
+        }
+        
+        #wizard-step-1 .max-w-md {
+            max-width: 100% !important;
+        }
+    }
+</style>
+
+<div class="h-screen w-screen bg-[#0f0f0f] font-sans text-white overflow-hidden flex flex-col">
+    <!-- SETUP SCENE (Auth) -->
+    <div id="scene-setup" class="w-full h-full flex flex-col relative z-50 bg-[#0f0f0f]">
+        <div class="h-16 flex items-center px-6 select-none" style="-webkit-app-region: drag">
+            <div class="flex items-center gap-4">
+                <!-- Logo Icon -->
+                <div class="relative">
+                    <div class="w-10 h-10 bg-gradient-to-br from-[#ff5500] to-[#ff7638] rounded-xl flex items-center justify-center shadow-lg">
+                        <i class="fa-solid fa-cloud text-white text-lg"></i>
+                    </div>
+                    <div class="absolute -top-1 -right-1 w-4 h-4 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center">
+                        <i class="fa-solid fa-shield-halved text-white text-xs"></i>
+                    </div>
+                </div>
+                <!-- Logo Text -->
+                <div class="flex flex-col">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl font-bold tracking-tight text-white">OK</span>
+                        <span class="text-xl font-bold tracking-tight bg-gradient-to-r from-[#ff5500] to-[#ff7638] bg-clip-text text-transparent">CLOUD</span>
+                    </div>
+                    <span class="text-xs font-medium text-gray-400 uppercase tracking-wider leading-none">SAFE STORAGE</span>
+                </div>
+            </div>
+        </div>
+        <div class="flex-1 flex items-center justify-center p-8 overflow-y-auto">
+            <div id="wizard-step-1" class="w-full max-w-md fade-enter">
+                <div class="text-center mb-10">
+                    <div class="w-24 h-24 bg-black rounded-full mx-auto flex items-center justify-center mb-6 shadow-2xl border border-[#2a2a2a]">
+                        <i class="fa-solid fa-cloud text-4xl text-[#ff5500]"></i>
+                    </div>
+                    <h1 class="text-3xl font-bold mb-3 tracking-tight text-white">Welcome to Ok Cloud</h1>
+                    <p class="text-gray-400">Secure & Fast Storage</p>
+                </div>
+                <div id="auth-initial" class="flex flex-col items-center gap-3 fade-enter">
+                    <button onclick="showEmailPasswordLogin()" class="w-full max-w-xs py-3.5 rounded-lg font-bold text-sm flex items-center justify-center gap-3 bg-[#ff5500] text-white shadow-lg hover:bg-[#e64d00] transition">
+                        <i class="fa-solid fa-envelope mr-2"></i><span>Sign in with Email/Password</span>
+                    </button>
+                </div>
+                <div id="auth-email" class="hidden w-full max-w-md fade-enter">
+                    <div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-6 space-y-4">
+                        <h3 class="text-lg font-bold text-white mb-4">Sign in to Ok Cloud</h3>
+                        <div>
+                            <label class="text-xs text-gray-500 mb-2 block">Email</label>
+                            <input type="email" id="email-input" placeholder="your.email.com" onkeypress="handleLoginKeyPress(event)" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500] transition"/>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-500 mb-2 block">Password</label>
+                            <input type="password" id="password-input" placeholder="••••••••" onkeypress="handleLoginKeyPress(event)" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500] transition"/>
+                        </div>
+                        <div class="flex gap-3 pt-2">
+                            <button onclick="cancelEmailLogin()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a] transition">Cancel</button>
+                            <button onclick="submitEmailLogin()" class="flex-1 bg-[#ff5500] py-2.5 rounded-lg text-sm font-bold text-white hover:bg-[#e64d00] transition">Sign In</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="auth-waiting" class="hidden text-center space-y-6 fade-enter">
+                    <div class="relative w-16 h-16 mx-auto pulse-ring">
+                        <div class="w-16 h-16 rounded-full bg-black border border-[#ff5500]/50 flex items-center justify-center relative z-10">
+                            <i class="fa-solid fa-circle-notch fa-spin text-[#ff5500] text-xl"></i>
+                        </div>
+                    </div>
+                    <div><h3 class="text-white font-medium">Waiting for login...</h3><p class="text-xs text-gray-500 mt-1">Check your browser.</p></div>
+                    <button onclick="cancelWaiting()" class="mt-4 px-6 py-2 rounded-lg text-sm text-gray-400 hover:bg-[#1a1a1a] transition">Cancel</button>
+                </div>
+            </div>
+            <div id="wizard-loading" class="w-full max-w-md text-center hidden">
+                <div class="relative w-20 h-20 mx-auto mb-8">
+                    <div class="absolute inset-0 border-4 border-[#1a1a1a] rounded-full"></div>
+                    <div class="absolute inset-0 border-4 border-t-[#ff5500] rounded-full animate-spin"></div>
+                </div>
+                <h2 class="text-xl font-bold mb-4">Loading your files...</h2>
+                <p class="text-gray-400 text-sm" id="loading-text">Connecting to server...</p>
+                
+                <!-- Emergency logout button (hidden by default, shown on errors) -->
+                <div id="emergency-logout" class="hidden mt-6">
+                    <p class="text-red-400 text-sm mb-3">Having trouble? Try logging out and back in.</p>
+                    <button onclick="logout()" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition">
+                        <i class="fa-solid fa-sign-out mr-2"></i>Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN DASHBOARD -->
+    <div id="scene-dashboard" class="absolute inset-0 w-full h-full bg-[#0f0f0f] flex hidden">
+        <!-- Sidebar Backdrop (for mobile) -->
+        <div id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+        
+        <!-- Sidebar -->
+        <div id="sidebar" class="w-64 bg-black border-r border-[#2a2a2a] flex flex-col flex-shrink-0 z-20 transition-transform duration-300">
+            <div class="h-16 flex flex-col justify-center px-5" style="-webkit-app-region: drag">
+                <div class="flex items-center gap-4">
+                    <!-- Logo Icon -->
+                    <div class="relative">
+                        <div class="w-9 h-9 bg-gradient-to-br from-[#ff5500] to-[#ff7638] rounded-xl flex items-center justify-center shadow-lg">
+                            <i class="fa-solid fa-cloud text-white text-base"></i>
+                        </div>
+                        <div class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center">
+                            <i class="fa-solid fa-shield-halved text-white text-xs"></i>
+                        </div>
+                    </div>
+                    <!-- Logo Text -->
+                    <div class="flex flex-col">
+                        <div class="flex items-center gap-2">
+                            <span class="text-lg font-bold tracking-tight text-white">OK</span>
+                            <span class="text-lg font-bold tracking-tight bg-gradient-to-r from-[#ff5500] to-[#ff7638] bg-clip-text text-transparent">CLOUD</span>
+                        </div>
+                        <span class="text-xs font-medium text-gray-400 uppercase tracking-wider leading-none">SAFE STORAGE</span>
+                    </div>
+                </div>
+            </div>
+            <!-- Upload button removed - sync-only mode -->
+            <div class="px-4 py-4 hidden">
+            </div>
+            <nav class="flex-1 space-y-1 px-2 mt-2">
+                <a href="javascript:void(0)" onclick="switchView('all'); return false;" data-view="all" class="nav-item active flex items-center gap-3 px-4 py-2.5 rounded-r-full text-sm font-medium">
+                    <i class="fa-solid fa-cloud w-5"></i> <span>All Files</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('shared'); return false;" data-view="shared" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full text-sm font-medium">
+                    <i class="fa-solid fa-users w-5"></i> <span>Shared with me</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('recent'); return false;" data-view="recent" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full text-sm font-medium">
+                    <i class="fa-solid fa-clock w-5"></i> <span>Recent</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('starred'); return false;" data-view="starred" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full text-sm font-medium">
+                    <i class="fa-solid fa-star w-5"></i> <span>Starred</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('trash'); return false;" data-view="trash" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full text-sm font-medium">
+                    <i class="fa-solid fa-trash w-5"></i> <span>Trash</span>
+                </a>
+                
+                <!-- Settings -->
+                <div class="border-t border-[#2a2a2a] mt-2 pt-2">
+                    <a href="/settings" onclick="openSettings(); return false;" class="nav-item flex items-center gap-3 px-4 py-2.5 rounded-r-full text-sm font-medium">
+                        <i class="fa-solid fa-cog w-5"></i> <span>Settings</span>
+                    </a>
+                </div>
+            </nav>
+            
+            <!-- Workspace -->
+            <div class="workspace-section px-4 py-3 border-t border-[#2a2a2a]">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-[#1a1a1a] rounded-lg p-2 -m-2" onclick="toggleWorkspaceMenu()" style="-webkit-app-region: no-drag">
+                    <div>
+                        <div id="workspace-name" class="text-sm font-medium text-white">Default</div>
+                        <div id="workspace-desc" class="text-xs text-gray-500">Personal workspace</div>
+                    </div>
+                    <i class="fa-solid fa-chevron-down text-gray-500 text-xs"></i>
+                </div>
+                <div id="workspace-menu" class="hidden mt-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg py-2 max-h-64 overflow-y-auto">
+                    <!-- Rich workspace menu will be populated by JavaScript -->
+                    <div class="px-3 py-2 text-xs text-gray-500 font-medium uppercase tracking-wide">Recent</div>
+                    <div id="workspace-list" class="space-y-1">
+                        <!-- Workspaces will be populated here -->
+                    </div>
+
+                </div>
+            </div>
+            
+            <!-- Storage Usage -->
+            <div class="px-4 py-4 border-t border-[#2a2a2a]">
+                <div class="flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-database text-gray-500 text-sm"></i>
+                    <span id="storage-text" class="text-xs text-gray-400">Loading...</span>
+                </div>
+                <div class="w-full h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden">
+                    <div id="storage-bar" class="h-full bg-[#ff5500] rounded-full transition-all" style="width: 0%"></div>
+                </div>
+                <button class="mt-3 w-full py-2 rounded-lg text-xs font-medium border border-[#ff5500] text-[#ff5500] hover:bg-[#ff5500]/10 transition">Upgrade</button>
+            </div>
+            
+            <!-- Sync Status -->
+            <div class="px-4 py-3 border-t border-[#2a2a2a]">
+                <div id="sync-status" class="flex items-center gap-2 text-xs text-gray-500">
+                    <i class="fa-solid fa-circle-check text-green-500"></i>
+                    <span>Synced</span>
+                </div>
+                <div id="offline-status" class="hidden flex items-center gap-2 text-xs text-orange-400 mt-1">
+                    <i class="fa-solid fa-wifi-slash"></i>
+                    <span>Offline Mode</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content -->
+        <div class="flex-1 flex flex-col bg-[#0f0f0f] relative z-10 min-w-0">
+            <!-- Header -->
+            <div class="h-16 border-b border-[#2a2a2a] flex items-center justify-between px-6 bg-[#0f0f0f]" style="-webkit-app-region: drag">
+                <div class="flex items-center gap-4 flex-1">
+                    <!-- Sidebar Toggle (visible on small screens) -->
+                    <button id="sidebar-toggle" onclick="toggleSidebar()" class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-[#2a2a2a] transition lg:hidden" style="-webkit-app-region: no-drag">
+                        <i class="fa-solid fa-bars text-lg"></i>
+                    </button>
+                    <!-- Navigation Arrows -->
+                    <div class="flex items-center gap-1" style="-webkit-app-region: no-drag">
+                        <button id="nav-back-btn" 
+                                onclick="navigateBackInHistory()" 
+                                class="p-2 rounded-lg text-gray-400 opacity-50 cursor-not-allowed transition"
+                                disabled
+                                title="Back">
+                            <i class="fa-solid fa-arrow-left"></i>
+                        </button>
+                        <button id="nav-forward-btn" 
+                                onclick="navigateForwardInHistory()" 
+                                class="p-2 rounded-lg text-gray-400 opacity-50 cursor-not-allowed transition"
+                                disabled
+                                title="Forward">
+                            <i class="fa-solid fa-arrow-right"></i>
+                        </button>
+                    </div>
+                    <div class="h-6 w-px bg-[#2a2a2a]"></div>
+                    <div id="view-title" class="text-white font-bold">All Files</div>
+                    <div class="flex-1 max-w-md" style="-webkit-app-region: no-drag">
+                        <div class="relative">
+                            <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm"></i>
+                            <input type="text" id="search-input" oninput="searchFiles(this.value)" placeholder="Search files and folders" class="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#ff5500]"/>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3" style="-webkit-app-region: no-drag">
+                    <!-- User Menu -->
+                    <div class="relative" onclick="toggleUserMenu()">
+                        <div class="flex items-center gap-2 cursor-pointer hover:bg-[#1a1a1a] rounded-lg px-2 py-1">
+                            <div id="user-avatar" class="w-8 h-8 rounded-full bg-[#ff5500] flex items-center justify-center text-sm font-bold text-white">U</div>
+                            <span id="user-name" class="text-sm text-gray-300 hidden md:block">User</span>
+                            <i class="fa-solid fa-chevron-down text-gray-500 text-xs"></i>
+                        </div>
+                        <div id="user-menu" class="hidden absolute right-0 top-12 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg py-2 min-w-[160px] shadow-xl">
+                            <a href="#" onclick="openProfileModal()" class="block px-4 py-2 text-sm text-gray-300 hover:bg-[#2a2a2a]"><i class="fa-solid fa-user mr-2"></i>Profile</a>
+                            <a href="#" onclick="toggleTheme()" class="block px-4 py-2 text-sm text-gray-300 hover:bg-[#2a2a2a]">
+                                <i id="theme-icon" class="fa-solid fa-sun mr-2"></i>
+                                <span id="theme-text">Light Mode</span>
+                            </a>
+                            <hr class="border-[#2a2a2a] my-1">
+                            <a href="#" onclick="logout()" class="block px-4 py-2 text-sm text-red-400 hover:bg-[#2a2a2a]"><i class="fa-solid fa-sign-out mr-2"></i>Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="px-6 py-3 border-b border-[#2a2a2a]">
+                <!-- Breadcrumbs -->
+                <div id="breadcrumbs-container" class="flex items-center gap-2 mb-3 text-sm hidden">
+                    <button onclick="navigateToBreadcrumb(0)" class="text-gray-400 hover:text-white flex items-center gap-1">
+                        <i class="fa-solid fa-home"></i>
+                        <span>Home</span>
+                    </button>
+                </div>
+                
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <button id="back-button" onclick="navigateBack()" class="hidden flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:bg-[#1a1a1a] hover:text-white transition">
+                            <i class="fa-solid fa-arrow-left"></i> <span>Back</span>
+                        </button>
+                        <!-- New Folder button removed - sync-only mode -->
+                        <!-- Empty Trash button (only visible in Trash view) -->
+                        <button id="empty-trash-btn" onclick="emptyTrash()" class="hidden flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-700 text-white transition">
+                            <i class="fa-solid fa-trash-can"></i> <span>Empty Trash</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Selection Actions (moved here from header) -->
+                    <div id="selection-actions" class="hidden items-center gap-3">
+                        <span id="selection-count" class="text-sm font-medium text-gray-400">0 selected</span>
+                        <div class="h-5 w-px bg-[#2a2a2a]"></div>
+                        <button onclick="selectAllFiles()" class="p-2 rounded-lg hover:bg-[#2a2a2a] text-gray-400 hover:text-white transition" title="Select All (Ctrl+A)">
+                            <i class="fa-solid fa-check-double text-lg"></i>
+                        </button>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- File List -->
+            <div class="flex-1 overflow-y-auto relative">
+                <!-- Table Header -->
+                <div id="list-header" class="grid grid-cols-12 gap-4 px-6 py-3 text-xs text-gray-500 uppercase font-medium tracking-wider border-b border-[#2a2a2a] sticky top-0 bg-[#0f0f0f] z-10">
+                    <div class="col-span-6">Name</div>
+                    <div class="col-span-3">Last modified</div>
+                    <div class="col-span-2">Size</div>
+                    <div class="col-span-1 text-right"><input type="checkbox" id="select-all" onchange="toggleSelectAll()" class="checkbox-custom"></div>
+                </div>
+                <div id="file-list-container" class="px-6"></div>
+                <div id="files-empty" class="hidden flex-1 flex flex-col items-center justify-center text-center mt-20">
+                    <i class="fa-solid fa-folder-open text-gray-700 text-6xl mb-4"></i>
+                    <h3 class="text-gray-400">No files found</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- Confirmation Modal (Small & Clean) -->
+    <div id="confirm-modal" class="modal-overlay hidden" onclick="if(event.target === this) closeConfirmModal()">
+        <div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-6 min-w-[320px] max-w-[400px]">
+            <h3 id="confirm-title" class="text-lg font-bold text-white mb-3">Confirm</h3>
+            <p id="confirm-message" class="text-sm text-gray-400 mb-6">Are you sure?</p>
+            <div class="flex gap-3">
+                <button onclick="closeConfirmModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a] transition">Cancel</button>
+                <button id="confirm-action-btn" onclick="confirmAction()" class="flex-1 bg-[#ef4444] py-2.5 rounded-lg text-sm font-bold text-white hover:bg-[#dc2626] transition">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-notification" class="fixed top-4 right-4 z-[9999] hidden">
+        <div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3 shadow-xl flex items-center gap-3 min-w-[280px]">
+            <i id="toast-icon" class="fa-solid fa-check-circle text-green-500"></i>
+            <span id="toast-message" class="text-white text-sm flex-1">Success!</span>
+        </div>
+    </div>
+
+    <!-- Rename Modal -->
+    <div id="rename-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3 class="text-lg font-bold text-white mb-4">Rename</h3>
+            <input type="text" id="rename-input" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500]"/>
+            <div class="flex gap-3 mt-4">
+                <button onclick="closeRenameModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a]">Cancel</button>
+                <button onclick="submitRename()" class="flex-1 bg-[#ff5500] py-2.5 rounded-lg text-sm font-bold text-white hover:bg-[#e64d00]">Rename</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Folder Modal -->
+    <div id="folder-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3 class="text-lg font-bold text-white mb-4">New Folder</h3>
+            <input type="text" id="folder-name-input" placeholder="Folder name" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500]"/>
+            <div class="flex gap-3 mt-4">
+                <button onclick="closeFolderModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a]">Cancel</button>
+                <button onclick="submitNewFolder()" class="flex-1 bg-[#ff5500] py-2.5 rounded-lg text-sm font-bold text-white hover:bg-[#e64d00]">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move/Folder Picker Modal -->
+    <div id="move-modal" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3 class="text-lg font-bold text-white mb-4">Move to Folder</h3>
+            <div id="move-breadcrumbs" class="flex items-center gap-2 mb-4 text-sm text-gray-400"></div>
+            <div id="move-folder-list" class="max-h-96 overflow-y-auto bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-2"></div>
+            <div class="flex gap-3 mt-4">
+                <button onclick="closeMoveModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a]">Cancel</button>
+                <button onclick="submitMove()" class="flex-1 bg-[#ff5500] py-2.5 rounded-lg text-sm font-bold text-white hover:bg-[#e64d00]">Move Here</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="preview-modal" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width: 90vw; max-height: 90vh; width: 800px;">
+            <div class="flex items-center justify-between mb-4">
+                <h3 id="preview-title" class="text-lg font-bold text-white">Preview</h3>
+                <button onclick="closePreview()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div id="preview-container" class="bg-[#0a0a0a] rounded-lg overflow-auto" style="max-height: 70vh;"></div>
+            <div class="flex gap-3 mt-4">
+                <button onclick="downloadFromPreview()" class="flex-1 py-2.5 rounded-lg text-sm bg-[#2a2a2a] text-white hover:bg-[#3a3a3a]">Download</button>
+                <button onclick="closePreview()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a]">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="share-modal" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3 class="text-lg font-bold text-white mb-4">Share File</h3>
+            <div class="mb-4">
+                <label class="text-xs text-gray-500 mb-2 block">Share with user</label>
+                <div class="flex gap-2">
+                    <input type="email" id="share-email-input" placeholder="user.example.com" class="flex-1 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#ff5500]"/>
+                    <select id="share-permission-select" class="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
+                        <option value="view">Can view</option>
+                        <option value="edit">Can edit</option>
+                    </select>
+                    <button onclick="addUserShare()" class="px-4 py-2 bg-[#ff5500] text-white rounded-lg text-sm hover:bg-[#e64d00]">Add</button>
+                </div>
+            </div>
+            <div id="shared-users-list" class="mb-4 max-h-40 overflow-y-auto"></div>
+            <hr class="border-[#2a2a2a] my-4">
+            <div>
+                <label class="text-xs text-gray-500 mb-2 block">Shareable Link</label>
+                <div id="link-section">
+                    <button onclick="generateShareableLink()" id="generate-link-btn" class="w-full py-2.5 rounded-lg text-sm border border-[#ff5500] text-[#ff5500] hover:bg-[#ff5500]/10">Generate Link</button>
+                    <div id="link-display" class="hidden">
+                        <div class="flex gap-2 mb-2">
+                            <input type="text" id="shareable-link-url" readonly class="flex-1 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-sm text-white"/>
+                            <button onclick="copyLinkToClipboard()" class="px-4 py-2 bg-[#2a2a2a] text-white rounded-lg text-sm hover:bg-[#3a3a3a]">Copy</button>
+                        </div>
+                        <button onclick="deleteShareableLink()" class="text-xs text-red-400 hover:text-red-300">Delete Link</button>
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-4">
+                <button onclick="closeShareModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a]">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Modal -->
+    <div id="profile-modal" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-bold text-white">Update name and profile image</h3>
+                <button onclick="closeProfileModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            
+            <div class="flex items-start gap-6 mb-6">
+                <!-- Profile Image -->
+                <div class="flex flex-col items-center">
+                    <div id="profile-avatar" class="w-20 h-20 rounded-full bg-[#ff5500] flex items-center justify-center text-2xl font-bold text-white mb-3">
+                        M
+                    </div>
+                    <button onclick="removeProfileImage()" class="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1">
+                        <i class="fa-solid fa-camera text-[#ff5500]"></i>
+                        Remove Image
+                    </button>
+                </div>
+                
+                <!-- Profile Info -->
+                <div class="flex-1">
+                    <div class="mb-4">
+                        <div id="profile-email" class="text-gray-400 text-sm mb-3">user.example.com</div>
+                        <label class="text-sm text-gray-300 mb-2 block">Name</label>
+                        <input type="text" id="profile-name-input" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500]" placeholder="Enter your name"/>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex gap-3">
+                <button onclick="closeProfileModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a] transition">Cancel</button>
+                <button onclick="saveProfile()" class="px-8 py-2.5 bg-[#ff5500] text-white rounded-lg text-sm font-medium hover:bg-[#e64d00] transition">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workspace Management Modal -->
+    <div id="workspace-manage-modal" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width: 400px; max-height: 80vh; overflow-y: auto;">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-bold text-white">Manage Workspace</h3>
+                <button onclick="closeWorkspaceManageModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            
+            <div class="space-y-3">
+                <!-- Members -->
+                <button onclick="manageWorkspaceMembers()" class="w-full flex items-center gap-3 px-4 py-3 bg-[#0a0a0a] hover:bg-[#2a2a2a] rounded-lg text-left transition">
+                    <i class="fa-solid fa-users text-[#ff5500] text-lg"></i>
+                    <div>
+                        <div class="text-white font-medium">Members</div>
+                        <div class="text-gray-400 text-sm">Manage workspace members</div>
+                    </div>
+                </button>
+                
+                <!-- Rename - Disabled in sync mode -->
+                <div class="w-full flex items-center gap-3 px-4 py-3 bg-[#0a0a0a] opacity-50 rounded-lg text-left cursor-not-allowed">
+                    <i class="fa-solid fa-pen text-gray-500 text-lg"></i>
+                    <div>
+                        <div class="text-gray-500 font-medium">Rename</div>
+                        <div class="text-gray-600 text-sm">Disabled in sync mode</div>
+                    </div>
+                </div>
+                
+                <!-- Delete -->
+                <button onclick="deleteWorkspace()" class="w-full flex items-center gap-3 px-4 py-3 bg-[#0a0a0a] hover:bg-[#2a1a1a] rounded-lg text-left transition">
+                    <i class="fa-solid fa-trash text-red-500 text-lg"></i>
+                    <div>
+                        <div class="text-red-400 font-medium">Delete</div>
+                        <div class="text-gray-400 text-sm">Permanently delete workspace</div>
+                    </div>
+                </button>
+            </div>
+            
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeWorkspaceManageModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a] transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workspace Rename Modal -->
+    <div id="workspace-rename-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3 class="text-lg font-bold text-white mb-4">Rename Workspace</h3>
+            <input type="text" id="workspace-rename-input" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500]" placeholder="Workspace name"/>
+            <div class="flex gap-3 mt-4">
+                <button onclick="closeWorkspaceRenameModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a]">Cancel</button>
+                <button onclick="submitWorkspaceRename()" class="flex-1 bg-[#ff5500] py-2.5 rounded-lg text-sm font-bold text-white hover:bg-[#e64d00]">Rename</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Workspace Modal -->
+    <div id="create-workspace-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3 class="text-lg font-bold text-white mb-4">Create New Workspace</h3>
+            <div class="mb-4">
+                <label class="text-sm text-gray-300 mb-2 block">Workspace Name</label>
+                <input type="text" id="create-workspace-name" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500]" placeholder="Enter workspace name"/>
+            </div>
+            <div class="flex gap-3 mt-4">
+                <button onclick="closeCreateWorkspaceModal()" class="flex-1 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-[#0a0a0a]">Cancel</button>
+                <button onclick="submitCreateWorkspace()" class="flex-1 bg-[#ff5500] py-2.5 rounded-lg text-sm font-bold text-white hover:bg-[#e64d00]">Create</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script>
+    // State
+    let currentView = 'all';
+    let allFiles = [];
+    let selectedFiles = new Set();
+    let viewMode = 'list';
+    let currentUser = null;
+    let renameFileId = null;
+    let currentFolderId = null;
+    let breadcrumbs = [{ folderId: null, name: 'Home' }];
+    let navigationHistory = [];
+    let navigationIndex = -1; // Current position in history
+    let moveTargetFileIds = [];
+    let shareTargetFileId = null;
+    let isOperationInProgress = false; // Prevent race conditions
+
+    // Auth Functions
+    window.startBrowserAuth = async () => {
+        document.getElementById('auth-initial').classList.add('hidden');
+        document.getElementById('auth-waiting').classList.remove('hidden');
+        try { await DotNet.invokeMethodAsync('OkCloud.Client', 'OpenLoginPage'); }
+        catch (err) { 
+            showNotification("Error: " + err, 'error');
+            window.resetAuth(); 
+        }
+    }
+
+    window.showEmailPasswordLogin = () => {
+        document.getElementById('auth-initial').classList.add('hidden');
+        document.getElementById('auth-email').classList.remove('hidden');
+        setTimeout(() => document.getElementById('email-input').focus(), 100);
+    }
+
+    window.cancelEmailLogin = () => {
+        document.getElementById('email-input').value = '';
+        document.getElementById('password-input').value = '';
+        window.resetAuth();
+    }
+
+    window.handleLoginKeyPress = (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            window.submitEmailLogin();
+        }
+    }
+
+    window.submitEmailLogin = async () => {
+        const email = document.getElementById('email-input').value.trim();
+        const password = document.getElementById('password-input').value;
+        if (!email || !password) { 
+            showNotification('Please enter both email and password', 'warning');
+            return; 
+        }
+        document.getElementById('auth-email').classList.add('hidden');
+        document.getElementById('auth-waiting').classList.remove('hidden');
+        try { await DotNet.invokeMethodAsync('OkCloud.Client', 'HandleEmailLogin', email, password); }
+        catch (err) { 
+            showNotification("Error: " + err, 'error');
+            window.resetAuth(); 
+        }
+    }
+
+    window.resetAuth = () => {
+        document.getElementById('auth-waiting').classList.add('hidden');
+        document.getElementById('auth-email').classList.add('hidden');
+        document.getElementById('auth-initial').classList.remove('hidden');
+        // Clear input fields
+        document.getElementById('email-input').value = '';
+        document.getElementById('password-input').value = '';
+    }
+    
+    window.showLoginError = (message) => {
+        // Show error notification
+        showNotification(message, 'error');
+        // Reset to login form
+        window.resetAuth();
+    }
+    
+    window.cancelWaiting = () => {
+        window.resetAuth();
+    }
+
+    window.onLoginSuccess = () => {
+        document.getElementById('wizard-step-1').classList.add('hidden');
+        document.getElementById('wizard-loading').classList.remove('hidden');
+    }
+
+    // Sanitize filename for display (decode Base64 encoded Arabic names)
+    function sanitizeDisplayName(fileName) {
+        try {
+            // Handle Base64 encoded filenames (=?utf-8?B?...?=)
+            if (fileName.startsWith('=?utf-8?B?') && fileName.endsWith('?=')) {
+                console.log('🔧 Decoding Base64 filename:', fileName);
+                
+                // Extract the Base64 part
+                const base64Part = fileName.substring(10, fileName.length - 2); // Remove =?utf-8?B? and ?=
+                
+                try {
+                    // Decode Base64 to bytes, then to UTF-8 string
+                    const decodedBytes = atob(base64Part);
+                    const decodedName = decodeURIComponent(escape(decodedBytes));
+                    console.log('🔧 Decoded to:', decodedName);
+                    return decodedName;
+                } catch (ex) {
+                    console.warn('⚠️ Failed to decode Base64 filename:', ex.message);
+                    // Fallback: use a safe name
+                    return `file_${Date.now()}.dat`;
+                }
+            }
+            
+            return fileName;
+        } catch (ex) {
+            console.warn('⚠️ Error sanitizing filename:', fileName, ex.message);
+            return fileName; // Return original if sanitization fails
+        }
+    }
+
+    // Get file icon based on filename extension
+    function getFileIconFromName(fileName) {
+        if (!fileName) return 'fa-file text-gray-400';
+        
+        // Get file extension (case insensitive)
+        const ext = fileName.toLowerCase().split('.').pop();
+        
+        switch (ext) {
+            case 'pdf':
+                return 'fa-file-pdf text-red-500';
+            case 'doc':
+            case 'docx':
+                return 'fa-file-word text-blue-500';
+            case 'xls':
+            case 'xlsx':
+                return 'fa-file-excel text-green-500';
+            case 'ppt':
+            case 'pptx':
+                return 'fa-file-powerpoint text-orange-500';
+            case 'txt':
+            case 'md':
+            case 'rtf':
+                return 'fa-file-lines text-yellow-400';
+            case 'jpg':
+            case 'jpeg':
+            case 'png':
+            case 'gif':
+            case 'bmp':
+            case 'svg':
+            case 'webp':
+                return 'fa-image text-blue-400';
+            case 'mp4':
+            case 'avi':
+            case 'mov':
+            case 'wmv':
+            case 'flv':
+            case 'webm':
+                return 'fa-file-video text-purple-400';
+            case 'mp3':
+            case 'wav':
+            case 'flac':
+            case 'aac':
+            case 'ogg':
+                return 'fa-file-audio text-green-400';
+            case 'zip':
+            case 'rar':
+            case '7z':
+            case 'tar':
+            case 'gz':
+                return 'fa-file-zipper text-yellow-500';
+            case 'js':
+            case 'ts':
+            case 'html':
+            case 'css':
+            case 'json':
+            case 'xml':
+                return 'fa-file-code text-cyan-400';
+            default:
+                return 'fa-file text-gray-400';
+        }
+    }
+
+    // Render Files
+    window.renderFiles = (jsonFiles) => {
+        allFiles = JSON.parse(jsonFiles);
+        renderFileList(allFiles);
+        document.getElementById('scene-setup').classList.add('hidden');
+        document.getElementById('scene-dashboard').classList.remove('hidden');
+        document.getElementById('scene-dashboard').classList.add('fade-enter');
+        
+        // Initialize navigation history with root
+        if (navigationHistory.length === 0) {
+            navigationHistory.push(null); // null = root folder
+            navigationIndex = 0;
+            updateNavigationButtons();
+        }
+    }
+
+    function renderFileList(files) {
+        const container = document.getElementById('file-list-container');
+        container.innerHTML = '';
+        selectedFiles.clear();
+        updateSelectionUI();
+
+        if (files.length === 0) {
+            document.getElementById('files-empty').classList.remove('hidden');
+            return;
+        }
+        document.getElementById('files-empty').classList.add('hidden');
+
+        files.forEach(file => {
+            // Sanitize filename for display
+            const displayName = sanitizeDisplayName(file.name);
+            
+            // Get icon based on filename extension (more reliable than server type)
+            let iconClass = 'fa-file text-gray-400';
+            if (file.type === 'folder') {
+                iconClass = 'fa-folder text-[#ff5500]';
+            } else {
+                // Use filename-based detection for files
+                iconClass = getFileIconFromName(displayName);
+            }
+
+            let size = formatSize(file.fileSize || file.file_size);
+            let dateStr = (file.updatedAt || file.updated_at) ? formatDate(file.updatedAt || file.updated_at) : '-';
+            // Handle both camelCase and snake_case, and boolean/number values
+            const isStarred = file.isStarred === true || file.starred === true || file.isStarred === 1 || file.starred === 1;
+            const starIcon = isStarred ? '<i class="fa-solid fa-star text-yellow-400 text-xs"></i>' : '';
+
+            const html = `
+            <div class="file-row grid grid-cols-12 gap-4 py-3 lg:py-2 md:py-1.5 sm:py-1 px-6 lg:px-4 md:px-3 sm:px-2 hover:bg-[#1a1a1a] cursor-pointer items-center border-b border-[#1a1a1a] group transition rounded-lg" 
+                 data-id="${file.id}" data-type="${file.type}" data-name="${file.name}"
+                 onclick="handleFileClick(event, ${file.id})" 
+                 ondblclick="handleFileDblClick(${file.id}, '${file.type}')">
+                <div class="col-span-6 flex items-center gap-3 md:gap-2 sm:gap-1">
+                    <i class="fa-solid ${iconClass} text-lg md:text-base sm:text-sm"></i>
+                    <div class="text-sm md:text-xs sm:text-xs text-gray-200 group-hover:text-white truncate font-medium">${displayName}</div>
+                    ${starIcon}
+                </div>
+                <div class="col-span-3 text-xs text-gray-400">${dateStr}</div>
+                <div class="col-span-2 text-xs text-gray-400">${size}</div>
+                <div class="col-span-1 flex justify-end items-center gap-2">
+                    <!-- 3 dots button removed - sync-only mode -->
+                    <input type="checkbox" class="checkbox-custom file-checkbox" data-id="${file.id}" onchange="event.stopPropagation(); toggleFileSelection(${file.id})" onclick="event.stopPropagation()">
+                </div>
+            </div>`;
+            container.insertAdjacentHTML('beforeend', html);
+        });
+    }
+
+    function formatSize(bytes) {
+        if (!bytes || bytes === 0) return '-';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+    }
+
+    function formatDate(dateStr) {
+        const date = new Date(dateStr);
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return `${months[date.getMonth()]} ${date.getDate().toString().padStart(2, '0')}, ${date.getFullYear()}`;
+    }
+
+    // File Selection
+    function handleFileClick(event, fileId) {
+        if (event.ctrlKey || event.metaKey) {
+            toggleFileSelection(fileId);
+        } else {
+            selectedFiles.clear();
+            selectedFiles.add(fileId);
+            updateSelectionUI();
+        }
+    }
+
+    function handleFileDblClick(fileId, type) {
+        if (type === 'folder') {
+            navigateToFolder(fileId);
+        } else {
+            previewFile(fileId);
+        }
+    }
+
+    // Folder Navigation with History Stack
+    async function navigateToFolder(folderId, skipHistory = false) {
+        if (!skipHistory) {
+            // Remove any forward history when navigating to a new location
+            navigationHistory = navigationHistory.slice(0, navigationIndex + 1);
+            navigationHistory.push(folderId);
+            navigationIndex = navigationHistory.length - 1;
+        }
+        
+        // Validate and set currentFolderId - ensure null for root
+        currentFolderId = (folderId && folderId > 0) ? folderId : null;
+        console.log(`🔍 Navigation: currentFolderId set to ${currentFolderId} (folderId was: ${folderId})`);
+        
+        await loadFolderContents(folderId);
+        updateNavigationButtons();
+    }
+
+    async function navigateBackInHistory() {
+        if (navigationIndex > 0) {
+            navigationIndex--;
+            const folderId = navigationHistory[navigationIndex];
+            currentFolderId = folderId;
+            await loadFolderContents(folderId, true); // true = skip adding to history
+            updateNavigationButtons();
+        }
+    }
+
+    async function navigateForwardInHistory() {
+        if (navigationIndex < navigationHistory.length - 1) {
+            navigationIndex++;
+            const folderId = navigationHistory[navigationIndex];
+            currentFolderId = folderId;
+            await loadFolderContents(folderId, true); // true = skip adding to history
+            updateNavigationButtons();
+        }
+    }
+
+    async function navigateToBreadcrumb(index) {
+        breadcrumbs = breadcrumbs.slice(0, index + 1);
+        const target = breadcrumbs[index];
+        await navigateToFolder(target.folderId);
+    }
+
+    function updateNavigationButtons() {
+        const backBtn = document.getElementById('nav-back-btn');
+        const forwardBtn = document.getElementById('nav-forward-btn');
+        
+        if (backBtn) {
+            if (navigationIndex > 0) {
+                backBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                backBtn.classList.add('hover:bg-[#2a2a2a]', 'cursor-pointer');
+                backBtn.disabled = false;
+            } else {
+                backBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                backBtn.classList.remove('hover:bg-[#2a2a2a]', 'cursor-pointer');
+                backBtn.disabled = true;
+            }
+        }
+        
+        if (forwardBtn) {
+            if (navigationIndex < navigationHistory.length - 1) {
+                forwardBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                forwardBtn.classList.add('hover:bg-[#2a2a2a]', 'cursor-pointer');
+                forwardBtn.disabled = false;
+            } else {
+                forwardBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                forwardBtn.classList.remove('hover:bg-[#2a2a2a]', 'cursor-pointer');
+                forwardBtn.disabled = true;
+            }
+        }
+    }
+
+    async function loadFolderContents(folderId, skipHistory = false) {
+        try {
+            if (blazorInstance) {
+                // Ensure currentFolderId is in sync
+                currentFolderId = (folderId && folderId > 0) ? folderId : null;
+                console.log(`🔍 Loading folder contents: folderId=${folderId}, currentFolderId=${currentFolderId}`);
+                console.log(`📍 Current breadcrumbs:`, breadcrumbs);
+                
+                const files = await blazorInstance.invokeMethodAsync('LoadFolderContents', folderId);
+                allFiles = JSON.parse(files);
+                renderFileList(allFiles);
+                updateBreadcrumbs();
+                
+                if (!skipHistory) {
+                    updateNavigationButtons();
+                }
+            }
+        } catch (err) {
+            console.error('Error loading folder:', err);
+            showNotification('Failed to load folder contents', 'error');
+        }
+    }
+
+    function updateBreadcrumbs() {
+        const container = document.getElementById('breadcrumbs-container');
+        const backButton = document.getElementById('back-button');
+        
+        if (breadcrumbs.length > 1) {
+            container.classList.remove('hidden');
+            backButton.classList.remove('hidden');
+            
+            container.innerHTML = breadcrumbs.map((crumb, index) => {
+                const isLast = index === breadcrumbs.length - 1;
+                return `
+                    <button onclick="navigateToBreadcrumb(${index})" class="${isLast ? 'text-white font-medium' : 'text-gray-400 hover:text-white'}">
+                        ${index === 0 ? '<i class="fa-solid fa-home"></i>' : ''} ${crumb.name}
+                    </button>
+                    ${!isLast ? '<i class="fa-solid fa-chevron-right text-gray-600 text-xs"></i>' : ''}
+                `;
+            }).join('');
+        } else {
+            container.classList.add('hidden');
+            backButton.classList.add('hidden');
+        }
+    }
+
+    window.setBreadcrumbs = (crumbs) => {
+        breadcrumbs = JSON.parse(crumbs);
+        updateBreadcrumbs();
+    }
+
+    function toggleFileSelection(fileId) {
+        if (selectedFiles.has(fileId)) selectedFiles.delete(fileId);
+        else selectedFiles.add(fileId);
+        updateSelectionUI();
+    }
+
+    function toggleSelectAll() {
+        const selectAll = document.getElementById('select-all').checked;
+        if (selectAll) {
+            allFiles.forEach(f => selectedFiles.add(f.id));
+        } else {
+            selectedFiles.clear();
+        }
+        updateSelectionUI();
+    }
+
+    function selectAllFiles() {
+        if (selectedFiles.size === allFiles.length) {
+            // All selected - deselect all
+            selectedFiles.clear();
+        } else {
+            // Select all
+            allFiles.forEach(f => selectedFiles.add(f.id));
+        }
+        updateSelectionUI();
+    }
+
+    function updateSelectionUI() {
+        const container = document.getElementById('file-list-container');
+        document.querySelectorAll('.file-checkbox').forEach(cb => {
+            cb.checked = selectedFiles.has(parseInt(cb.dataset.id));
+        });
+        document.querySelectorAll('.file-row').forEach(row => {
+            row.classList.toggle('selected', selectedFiles.has(parseInt(row.dataset.id)));
+        });
+        
+        // Add/remove has-selection class to show all checkboxes when any file is selected
+        if (selectedFiles.size > 0) {
+            container.classList.add('has-selection');
+        } else {
+            container.classList.remove('has-selection');
+        }
+        
+        const actions = document.getElementById('selection-actions');
+        const count = document.getElementById('selection-count');
+        if (selectedFiles.size > 0) {
+            actions.classList.remove('hidden');
+            actions.classList.add('flex');
+            count.textContent = `${selectedFiles.size} selected`;
+        } else {
+            actions.classList.add('hidden');
+            actions.classList.remove('flex');
+        }
+    }
+
+
+
+
+
+    // Click outside to close menus
+    document.addEventListener('click', (e) => {
+        // Close user menu
+        const userMenu = document.getElementById('user-menu');
+        const userMenuTrigger = e.target.closest('[onclick*="toggleUserMenu"]');
+        if (userMenu && !userMenu.contains(e.target) && !userMenuTrigger) {
+            userMenu.classList.add('hidden');
+        }
+        
+        // Close workspace menu
+        const workspaceMenu = document.getElementById('workspace-menu');
+        const workspaceTrigger = e.target.closest('[onclick*="toggleWorkspaceMenu"]');
+        if (workspaceMenu && !workspaceMenu.contains(e.target) && !workspaceTrigger) {
+            workspaceMenu.classList.add('hidden');
+        }
+    });
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+A = Select All
+        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+            e.preventDefault();
+            selectAllFiles();
+        }
+        // Delete key = Delete selected files
+        if (e.key === 'Delete' && selectedFiles.size > 0) {
+            e.preventDefault();
+            deleteSelected();
+        }
+        // Escape = Deselect all
+        if (e.key === 'Escape' && selectedFiles.size > 0) {
+            e.preventDefault();
+            selectedFiles.clear();
+            updateSelectionUI();
+        }
+        // Alt + Left Arrow = Back
+        if (e.altKey && e.key === 'ArrowLeft') {
+            e.preventDefault();
+            navigateBackInHistory();
+        }
+        // Alt + Right Arrow = Forward
+        if (e.altKey && e.key === 'ArrowRight') {
+            e.preventDefault();
+            navigateForwardInHistory();
+        }
+    });
+
+    // Blazor instance reference
+    let blazorInstance = null;
+    
+    window.registerBlazorInstance = (instance) => {
+        blazorInstance = instance;
+        console.log('✅ Blazor instance registered');
+    }
+    
+    window.showViewError = (message) => {
+        document.getElementById('file-list-container').innerHTML = '<div class="text-center py-10 text-red-500">Error: ' + message + '</div>';
+    }
+    
+    window.handleSessionExpired = () => {
+        // Show notification
+        showNotification('Session expired. Please login again.', 'warning');
+        
+        // Hide dashboard and show login screen
+        document.getElementById('scene-dashboard').classList.add('hidden');
+        document.getElementById('scene-setup').classList.remove('hidden');
+        
+        // Reset to initial auth state
+        window.resetAuth();
+    }
+
+    // View Switching
+    window.switchView = async (view) => {
+        console.log('🔄 switchView called:', view);
+        currentView = view;
+        
+        // CRITICAL FIX: Reset navigation state when switching to "all" view (root)
+        if (view === 'all') {
+            currentFolderId = null;
+            breadcrumbs = [{ folderId: null, name: 'Home' }];
+            navigationHistory = [null];
+            navigationIndex = 0;
+            console.log('🏠 Reset navigation state to root for "all" view');
+            
+            // Hide breadcrumbs and back button when at root
+            document.getElementById('breadcrumbs-container').classList.add('hidden');
+            document.getElementById('back-button').classList.add('hidden');
+            updateNavigationButtons();
+        }
+        
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.view === view);
+        });
+        const titles = { all: 'All Files', shared: 'Shared with me', recent: 'Recent', starred: 'Starred', trash: 'Trash' };
+        document.getElementById('view-title').textContent = titles[view] || 'All Files';
+        
+        // Show/hide Empty Trash button based on view
+        const emptyTrashBtn = document.getElementById('empty-trash-btn');
+        if (emptyTrashBtn) {
+            if (view === 'trash') {
+                emptyTrashBtn.classList.remove('hidden');
+            } else {
+                emptyTrashBtn.classList.add('hidden');
+            }
+        }
+        
+        // Show loading state
+        document.getElementById('file-list-container').innerHTML = '<div class="text-center py-10 text-gray-500"><i class="fa-solid fa-spinner fa-spin text-2xl"></i><p class="mt-2">Loading ' + view + '...</p></div>';
+        
+        try {
+            if (blazorInstance) {
+                console.log('📡 Calling Blazor instance LoadViewInstance...');
+                await blazorInstance.invokeMethodAsync('LoadViewInstance', view);
+                console.log('✅ LoadViewInstance completed');
+            } else {
+                console.error('❌ Blazor instance not registered');
+                document.getElementById('file-list-container').innerHTML = '<div class="text-center py-10 text-red-500">Error: Component not ready</div>';
+            }
+        } catch (err) {
+            console.error('❌ LoadView error:', err);
+            document.getElementById('file-list-container').innerHTML = '<div class="text-center py-10 text-red-500">Error: ' + err + '</div>';
+        }
+    }
+
+    // Actions
+    window.uploadFile = async () => { 
+        // Get current folder context
+        const parentId = (currentFolderId && currentFolderId > 0) ? currentFolderId : null;
+        console.log(`📤 Uploading files to folder: ${parentId}`);
+        console.log(`🔍 Current context: view=${currentView}, folderId=${currentFolderId}`);
+        
+        await DotNet.invokeMethodAsync('OkCloud.Client', 'UploadFile', parentId); 
+    }
+    window.createFolder = () => { 
+        // Folder creation disabled in sync-only mode
+        showNotification('Folder creation is disabled in sync mode. Folders are managed through the workspace system.', 'info');
+        console.log('📁 Folder creation disabled - sync-only mode');
+    }
+    window.closeFolderModal = () => { document.getElementById('folder-modal').classList.add('hidden'); document.getElementById('folder-name-input').value = ''; }
+    window.submitNewFolder = async () => {
+        const name = document.getElementById('folder-name-input').value.trim();
+        if (!name) {
+            showNotification('Please enter a folder name', 'warning');
+            return;
+        }
+        
+        // Prevent race conditions
+        if (isOperationInProgress) {
+            showNotification('Please wait for the current operation to complete', 'warning');
+            return;
+        }
+        
+        try {
+            isOperationInProgress = true;
+            
+            // Validate currentFolderId before sending
+            const parentId = (currentFolderId && currentFolderId > 0) ? currentFolderId : null;
+            console.log(`🔍 Creating folder "${name}" with parentId: ${parentId}`);
+            console.log(`🔍 Current view: ${currentView}, breadcrumbs:`, breadcrumbs);
+            
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'CreateFolder', name, parentId); 
+            closeFolderModal(); 
+            showNotification(`Folder "${name}" created successfully`, 'success');
+        } catch (error) {
+            console.error('❌ Folder creation failed:', error);
+            showNotification('Failed to create folder: ' + error, 'error');
+        } finally {
+            isOperationInProgress = false;
+        }
+    }
+
+    window.openRenameModal = (fileId, currentName) => {
+        renameFileId = fileId;
+        document.getElementById('rename-input').value = currentName;
+        document.getElementById('rename-modal').classList.remove('hidden');
+        document.getElementById('context-menu').classList.add('hidden');
+        setTimeout(() => {
+            const input = document.getElementById('rename-input');
+            input.focus();
+            input.select();
+            input.onkeypress = (e) => { if (e.key === 'Enter') submitRename(); };
+        }, 100);
+    }
+    window.closeRenameModal = () => { document.getElementById('rename-modal').classList.add('hidden'); renameFileId = null; }
+    window.submitRename = async () => {
+        const newName = document.getElementById('rename-input').value.trim();
+        if (newName && renameFileId) { await DotNet.invokeMethodAsync('OkCloud.Client', 'RenameFile', renameFileId, newName); closeRenameModal(); }
+    }
+
+
+    // Custom confirmation modal
+    let confirmCallback = null;
+    
+    window.showConfirmModal = (title, message, actionText, callback) => {
+        document.getElementById('confirm-title').textContent = title;
+        document.getElementById('confirm-message').textContent = message;
+        document.getElementById('confirm-action-btn').textContent = actionText;
+        confirmCallback = callback;
+        document.getElementById('confirm-modal').classList.remove('hidden');
+    }
+    
+    window.closeConfirmModal = () => {
+        document.getElementById('confirm-modal').classList.add('hidden');
+        confirmCallback = null;
+    }
+    
+    window.confirmAction = () => {
+        if (confirmCallback) confirmCallback();
+        closeConfirmModal();
+    }
+    
+    // Toast notification system
+    window.showNotification = (message, type = 'success') => {
+        const toast = document.getElementById('toast-notification');
+        const icon = document.getElementById('toast-icon');
+        const msg = document.getElementById('toast-message');
+        
+        // Set icon and color based on type
+        const types = {
+            success: { icon: 'fa-check-circle', color: 'text-green-500' },
+            error: { icon: 'fa-exclamation-circle', color: 'text-red-500' },
+            warning: { icon: 'fa-exclamation-triangle', color: 'text-orange-500' },
+            info: { icon: 'fa-info-circle', color: 'text-blue-500' }
+        };
+        
+        const config = types[type] || types.success;
+        icon.className = `fa-solid ${config.icon} ${config.color}`;
+        msg.textContent = message;
+        
+        // Show toast
+        toast.classList.remove('hidden');
+        
+        // Auto-hide after 3 seconds
+        setTimeout(() => {
+            toast.classList.add('hidden');
+        }, 3000);
+    }
+    
+    window.deletePermanently = (fileId) => { 
+        document.getElementById('context-menu').classList.add('hidden'); 
+        showConfirmModal(
+            'Delete Forever?',
+            'This file will be permanently deleted and cannot be recovered.',
+            'Delete Forever',
+            () => DotNet.invokeMethodAsync('OkCloud.Client', 'DeletePermanently', fileId)
+        );
+    }
+    
+    // Copy file
+    window.copyFile = async (fileId) => {
+        document.getElementById('context-menu').classList.add('hidden');
+        await DotNet.invokeMethodAsync('OkCloud.Client', 'CopyFile', fileId);
+    }
+
+    // Preview file
+
+
+    window.closePreview = () => {
+        document.getElementById('preview-modal').classList.add('hidden');
+        document.getElementById('preview-container').innerHTML = '';
+    }
+
+    let previewFileId = null;
+    window.showPreview = (fileId, fileName, content, mimeType) => {
+        previewFileId = fileId;
+        const displayName = sanitizeDisplayName(fileName);
+        document.getElementById('preview-title').textContent = displayName;
+        const container = document.getElementById('preview-container');
+        
+        if (mimeType.startsWith('image/')) {
+            container.innerHTML = `<img src="data:${mimeType};base64,${content}" class="max-w-full h-auto mx-auto" />`;
+        } else if (mimeType === 'application/pdf') {
+            container.innerHTML = `<iframe src="data:application/pdf;base64,${content}" class="w-full h-full" style="min-height: 500px;"></iframe>`;
+        } else if (mimeType.startsWith('text/') || mimeType.includes('json') || mimeType.includes('xml')) {
+            const text = atob(content);
+            container.innerHTML = `<pre class="text-gray-300 text-sm p-4 overflow-auto">${escapeHtml(text)}</pre>`;
+        } else if (mimeType.startsWith('video/')) {
+            container.innerHTML = `<video controls class="max-w-full h-auto mx-auto"><source src="data:${mimeType};base64,${content}" type="${mimeType}"></video>`;
+        } else if (mimeType.startsWith('audio/')) {
+            container.innerHTML = `<audio controls class="w-full"><source src="data:${mimeType};base64,${content}" type="${mimeType}"></audio>`;
+        } else {
+            container.innerHTML = `<div class="text-center text-gray-400 p-8">Preview not available for this file type.<br><button onclick="downloadFromPreview()" class="mt-4 px-4 py-2 bg-[#ff5500] text-white rounded-lg">Download</button></div>`;
+        }
+        
+        document.getElementById('preview-modal').classList.remove('hidden');
+    }
+
+    window.downloadFromPreview = () => {
+        if (previewFileId) {
+            DotNet.invokeMethodAsync('OkCloud.Client', 'DownloadFile', previewFileId);
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Move Modal
+    let moveBreadcrumbs = [];
+    let moveCurrentFolderId = null;
+    
+    window.openMoveModal = async (fileIds) => {
+        moveTargetFileIds = fileIds;
+        moveCurrentFolderId = null;
+        moveBreadcrumbs = [{ id: null, name: 'Home' }];
+        document.getElementById('move-modal').classList.remove('hidden');
+        await loadMoveFolders(null);
+        updateMoveBreadcrumbs();
+    }
+
+    window.closeMoveModal = () => {
+        document.getElementById('move-modal').classList.add('hidden');
+        moveTargetFileIds = [];
+        moveBreadcrumbs = [];
+        moveCurrentFolderId = null;
+    }
+
+    window.submitMove = async () => {
+        if (moveTargetFileIds.length > 0) {
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'MoveFiles', moveTargetFileIds, moveCurrentFolderId);
+            closeMoveModal();
+        }
+    }
+
+    async function loadMoveFolders(folderId) {
+        try {
+            console.log('Loading folders for parent:', folderId);
+            const folders = await DotNet.invokeMethodAsync('OkCloud.Client', 'GetFoldersForMove', folderId);
+            const folderList = JSON.parse(folders);
+            console.log('Got folders:', folderList);
+            const container = document.getElementById('move-folder-list');
+            
+            // Don't filter - show all folders
+            // User can navigate into any folder, and we'll prevent moving into selected files on the backend
+            
+            if (folderList.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-8 text-sm">No folders here</div>';
+                return;
+            }
+            
+            container.innerHTML = folderList.map(f => `
+                <div class="flex items-center justify-between p-3 hover:bg-[#2a2a2a] rounded cursor-pointer group" onclick="selectMoveFolder(${f.id}, '${f.name.replace(/'/g, "\\'")}')">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-folder text-[#ff5500] text-lg"></i>
+                        <span class="text-white text-sm">${f.name}</span>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-gray-600 group-hover:text-gray-400 text-xs"></i>
+                </div>
+            `).join('');
+            console.log('Rendered', folderList.length, 'folders');
+        } catch (err) {
+            console.error('Error loading folders:', err);
+            const container = document.getElementById('move-folder-list');
+            container.innerHTML = '<div class="text-center text-red-500 py-8 text-sm">Error loading folders</div>';
+        }
+    }
+
+    window.selectMoveFolder = async (folderId, folderName) => {
+        moveCurrentFolderId = folderId;
+        moveBreadcrumbs.push({ id: folderId, name: folderName });
+        await loadMoveFolders(folderId);
+        updateMoveBreadcrumbs();
+    }
+    
+    window.navigateToMoveBreadcrumb = async (index) => {
+        moveBreadcrumbs = moveBreadcrumbs.slice(0, index + 1);
+        const targetFolder = moveBreadcrumbs[index];
+        moveCurrentFolderId = targetFolder.id;
+        await loadMoveFolders(targetFolder.id);
+        updateMoveBreadcrumbs();
+    }
+    
+    function updateMoveBreadcrumbs() {
+        const container = document.getElementById('move-breadcrumbs');
+        container.innerHTML = moveBreadcrumbs.map((crumb, index) => `
+            <button onclick="navigateToMoveBreadcrumb(${index})" class="text-gray-400 hover:text-white flex items-center gap-1 text-sm">
+                ${index === 0 ? '<i class="fa-solid fa-home"></i>' : ''}
+                <span>${crumb.name}</span>
+            </button>
+            ${index < moveBreadcrumbs.length - 1 ? '<i class="fa-solid fa-chevron-right text-gray-600 text-xs"></i>' : ''}
+        `).join('');
+    }
+
+    // Share Modal
+    window.openShareModal = async (fileId) => {
+        shareTargetFileId = fileId;
+        document.getElementById('share-modal').classList.remove('hidden');
+        await loadFileShares(fileId);
+        await loadShareableLink(fileId);
+    }
+
+    window.closeShareModal = () => {
+        document.getElementById('share-modal').classList.add('hidden');
+        shareTargetFileId = null;
+    }
+
+    async function loadFileShares(fileId) {
+        try {
+            const shares = await DotNet.invokeMethodAsync('OkCloud.Client', 'GetFileShares', fileId);
+            const shareList = JSON.parse(shares);
+            const container = document.getElementById('shared-users-list');
+            
+            if (shareList.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-sm text-center py-2">Not shared with anyone</div>';
+            } else {
+                container.innerHTML = shareList.map(s => `
+                    <div class="flex items-center justify-between p-2 bg-[#0a0a0a] rounded mb-2">
+                        <div>
+                            <div class="text-white text-sm">${s.userName || s.userEmail}</div>
+                            <div class="text-gray-500 text-xs">${s.permissions}</div>
+                        </div>
+                        <button onclick="removeUserShare(${s.userId})" class="text-red-400 hover:text-red-300 text-sm">Remove</button>
+                    </div>
+                `).join('');
+            }
+        } catch (err) {
+            console.error('Error loading shares:', err);
+        }
+    }
+
+    async function loadShareableLink(fileId) {
+        try {
+            const link = await DotNet.invokeMethodAsync('OkCloud.Client', 'GetShareableLink', fileId);
+            if (link) {
+                document.getElementById('generate-link-btn').classList.add('hidden');
+                document.getElementById('link-display').classList.remove('hidden');
+                document.getElementById('shareable-link-url').value = link;
+            } else {
+                document.getElementById('generate-link-btn').classList.remove('hidden');
+                document.getElementById('link-display').classList.add('hidden');
+            }
+        } catch (err) {
+            console.error('Error loading link:', err);
+        }
+    }
+
+    window.addUserShare = async () => {
+        const email = document.getElementById('share-email-input').value.trim();
+        const permission = document.getElementById('share-permission-select').value;
+        
+        if (email && shareTargetFileId) {
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'ShareWithUser', shareTargetFileId, email, permission);
+            document.getElementById('share-email-input').value = '';
+            await loadFileShares(shareTargetFileId);
+        }
+    }
+
+    window.removeUserShare = async (userId) => {
+        if (shareTargetFileId) {
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'RemoveUserShare', shareTargetFileId, userId);
+            await loadFileShares(shareTargetFileId);
+        }
+    }
+
+    window.generateShareableLink = async () => {
+        if (shareTargetFileId) {
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'GenerateShareableLink', shareTargetFileId);
+            await loadShareableLink(shareTargetFileId);
+        }
+    }
+
+    window.deleteShareableLink = async () => {
+        if (shareTargetFileId) {
+            showConfirmModal(
+                'Delete Link?',
+                'Remove this shareable link? Anyone with the link will lose access.',
+                'Delete Link',
+                async () => {
+                    await DotNet.invokeMethodAsync('OkCloud.Client', 'DeleteShareableLink', shareTargetFileId);
+                    await loadShareableLink(shareTargetFileId);
+                }
+            );
+        }
+    }
+
+    window.copyLinkToClipboard = () => {
+        const input = document.getElementById('shareable-link-url');
+        input.select();
+        document.execCommand('copy');
+        alert('Link copied to clipboard!');
+    }
+
+    window.copyShareableLink = async (fileId) => {
+        document.getElementById('context-menu').classList.add('hidden');
+        const link = await DotNet.invokeMethodAsync('OkCloud.Client', 'GetShareableLink', fileId);
+        if (link) {
+            navigator.clipboard.writeText(link);
+            showNotification('Link copied to clipboard!', 'success');
+        } else {
+            showNotification('No shareable link exists for this file.', 'warning');
+        }
+    }
+
+    window.downloadSelected = () => { selectedFiles.forEach(id => DotNet.invokeMethodAsync('OkCloud.Client', 'DownloadFile', id)); }
+    window.starSelected = () => { selectedFiles.forEach(id => DotNet.invokeMethodAsync('OkCloud.Client', 'ToggleStar', id)); }
+    window.deleteSelected = () => { 
+        showConfirmModal(
+            'Delete Files?',
+            `Move ${selectedFiles.size} file(s) to trash?`,
+            'Delete',
+            () => selectedFiles.forEach(id => DotNet.invokeMethodAsync('OkCloud.Client', 'DeleteFile', id))
+        );
+    }
+    window.restoreSelected = () => { selectedFiles.forEach(id => DotNet.invokeMethodAsync('OkCloud.Client', 'RestoreFile', id)); }
+    window.deleteSelectedPermanently = () => { 
+        showConfirmModal(
+            'Delete Forever?',
+            `Permanently delete ${selectedFiles.size} file(s)? This cannot be undone.`,
+            'Delete Forever',
+            () => selectedFiles.forEach(id => DotNet.invokeMethodAsync('OkCloud.Client', 'DeletePermanently', id))
+        );
+    }
+    window.emptyTrash = () => {
+        showConfirmModal(
+            'Empty Trash?',
+            'This will permanently delete all files in trash and free up storage space. This action cannot be undone.',
+            'Empty Trash',
+            () => DotNet.invokeMethodAsync('OkCloud.Client', 'EmptyTrash')
+        );
+    }
+    
+    window.showTrashNotification = (fileCount) => {
+        const notification = document.createElement('div');
+        notification.className = 'fixed top-4 right-4 bg-orange-600 text-white px-6 py-4 rounded-lg shadow-xl z-50 flex items-center gap-4 max-w-md';
+        notification.innerHTML = `
+            <div class="flex-1">
+                <div class="font-semibold">Trash contains ${fileCount} file(s)</div>
+                <div class="text-sm text-orange-100 mt-1">Empty trash to free up storage space</div>
+            </div>
+            <button onclick="this.parentElement.remove(); DotNet.invokeMethodAsync('OkCloud.Client', 'EmptyTrash');" 
+                    class="bg-white text-orange-600 px-4 py-2 rounded font-semibold hover:bg-orange-50 transition">
+                Empty Now
+            </button>
+            <button onclick="this.parentElement.remove();" 
+                    class="text-orange-100 hover:text-white transition">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        `;
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 10 seconds
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.remove();
+            }
+        }, 10000);
+    }
+    window.emptyTrash = () => {
+        showConfirmModal(
+            'Empty Trash?',
+            'This will permanently delete all files in trash and free up storage space. This action cannot be undone.',
+            'Empty Trash',
+            () => DotNet.invokeMethodAsync('OkCloud.Client', 'EmptyTrash')
+        );
+    }
+    window.moveSelected = () => { openMoveModal(Array.from(selectedFiles)); }
+    window.copySelected = async () => { 
+        for (const id of selectedFiles) {
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'CopyFile', id);
+        }
+    }
+
+    window.searchFiles = (query) => {
+        const filtered = allFiles.filter(f => {
+            const displayName = sanitizeDisplayName(f.name);
+            return displayName.toLowerCase().includes(query.toLowerCase());
+        });
+        renderFileList(filtered);
+    }
+
+    // View mode functionality removed
+
+    window.updateStorageUI = (used, available) => {
+        const pct = available > 0 ? (used / available * 100) : 0;
+        document.getElementById('storage-bar').style.width = pct + '%';
+        document.getElementById('storage-text').textContent = `${formatSize(used)} of ${formatSize(available)} used`;
+    }
+
+    window.setUserInfo = (name, email) => {
+        // Check for saved display name first
+        const savedName = localStorage.getItem('user_display_name');
+        const displayName = savedName || name || email || 'User';
+        
+        // Store current user info globally
+        currentUser = { name: displayName, email: email };
+        
+        // Update UI
+        document.getElementById('user-name').textContent = displayName;
+        document.getElementById('user-avatar').textContent = displayName.charAt(0).toUpperCase();
+        
+        console.log('✅ User info set:', displayName, email);
+    }
+
+    // Global workspace state
+    let currentWorkspaces = [];
+    let currentWorkspaceId = null;
+
+    window.setWorkspaces = (workspacesJson, activeWorkspaceId) => {
+        try {
+            const workspaces = JSON.parse(workspacesJson);
+            console.log('📋 Workspaces:', workspaces);
+            
+            if (!workspaces || workspaces.length === 0) return;
+            
+            // Store globally for later use
+            currentWorkspaces = workspaces;
+            currentWorkspaceId = activeWorkspaceId;
+            
+            // Find current workspace
+            const currentWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
+            
+            // Update current workspace display
+            document.getElementById('workspace-name').textContent = currentWorkspace.name;
+            document.getElementById('workspace-desc').textContent = currentWorkspace.isDefault || currentWorkspace.default ? 'Personal workspace' : 'Team workspace';
+            
+            // Build rich workspace menu like web version
+            const workspaceList = document.getElementById('workspace-list');
+            workspaceList.innerHTML = workspaces.map(w => {
+                const isActive = w.id === activeWorkspaceId;
+                const isDefault = w.isDefault || w.default;
+                const memberCount = w.memberCount || 1; // Default to 1 if not provided
+                
+                return `
+                    <div class="flex items-center justify-between px-3 py-2 hover:bg-[#2a2a2a] rounded cursor-pointer ${isActive ? 'bg-[#2a2a2a]' : ''}" 
+                         onclick="switchWorkspace(${w.id})">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-${isActive ? 'check' : 'folder'} text-[#ff5500] text-sm"></i>
+                            <div>
+                                <div class="text-sm text-white font-medium">${w.name}</div>
+                                <div class="text-xs text-gray-500">${isDefault ? 'Personal workspace' : `${memberCount} members`}</div>
+                            </div>
+                        </div>
+                        ${!isDefault ? `
+                            <button onclick="event.stopPropagation(); showWorkspaceManageMenu(event, ${w.id}, '${w.name.replace(/'/g, "\\'")}', ${isActive})" 
+                                    class="px-3 py-1 text-xs text-[#ff5500] border border-[#ff5500] rounded hover:bg-[#ff5500] hover:text-white transition">
+                                Manage <i class="fa-solid fa-chevron-down ml-1"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            console.log('✅ Rich workspaces loaded');
+        } catch (err) {
+            console.error('❌ Error setting workspaces:', err);
+        }
+    }
+
+    window.updateCurrentWorkspace = (newWorkspaceId) => {
+        try {
+            if (!currentWorkspaces || currentWorkspaces.length === 0) return;
+            
+            currentWorkspaceId = newWorkspaceId;
+            const newWorkspace = currentWorkspaces.find(w => w.id === newWorkspaceId);
+            
+            if (newWorkspace) {
+                // Update current workspace display
+                document.getElementById('workspace-name').textContent = newWorkspace.name;
+                document.getElementById('workspace-desc').textContent = (newWorkspace.isDefault || newWorkspace.default) ? 'Personal workspace' : 'Team workspace';
+                
+                // Update rich workspace menu to show new selection
+                const workspaceList = document.getElementById('workspace-list');
+                workspaceList.innerHTML = currentWorkspaces.map(w => {
+                    const isActive = w.id === newWorkspaceId;
+                    const isDefault = w.isDefault || w.default;
+                    const memberCount = w.memberCount || 1;
+                    
+                    return `
+                        <div class="flex items-center justify-between px-3 py-2 hover:bg-[#2a2a2a] rounded cursor-pointer ${isActive ? 'bg-[#2a2a2a]' : ''}" 
+                             onclick="switchWorkspace(${w.id})">
+                            <div class="flex items-center gap-3">
+                                <i class="fa-solid fa-${isActive ? 'check' : 'folder'} text-[#ff5500] text-sm"></i>
+                                <div>
+                                    <div class="text-sm text-white font-medium">${w.name}</div>
+                                    <div class="text-xs text-gray-500">${isDefault ? 'Personal workspace' : `${memberCount} members`}</div>
+                                </div>
+                            </div>
+                            ${!isDefault ? `
+                                <button onclick="event.stopPropagation(); manageWorkspace(${w.id})" 
+                                        class="px-3 py-1 text-xs text-[#ff5500] border border-[#ff5500] rounded hover:bg-[#ff5500] hover:text-white transition">
+                                    Manage <i class="fa-solid fa-chevron-down ml-1"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('');
+                
+                console.log('✅ Workspace updated to:', newWorkspace.name);
+                showNotification(`Switched to ${newWorkspace.name}`, 'success');
+            }
+        } catch (err) {
+            console.error('❌ Error updating workspace:', err);
+        }
+    }
+
+    // Sync Settings and Diagnostics
+    window.openSyncSettings = async () => {
+        try { 
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'OpenSyncSettings'); 
+        }
+        catch (err) { 
+            console.error('Sync settings error:', err); 
+            showNotification('Error opening sync settings', 'error');
+        }
+    }
+
+    window.diagnoseSyncIssue = async () => {
+        try { 
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'DiagnoseSyncIssue'); 
+        }
+        catch (err) { 
+            console.error('Diagnostic error:', err); 
+            showNotification('Error running diagnostics', 'error');
+        }
+    }
+
+    window.loadWorkspaces = async () => {
+        try {
+            console.log('🔄 Loading workspaces...');
+            const workspacesJson = await DotNet.invokeMethodAsync('OkCloud.Client', 'GetWorkspaces');
+            const workspaces = JSON.parse(workspacesJson);
+            
+            if (workspaces && workspaces.length > 0) {
+                console.log('📋 Loaded workspaces:', workspaces);
+                // Use first workspace as default if no current workspace is set
+                const activeId = currentWorkspaceId || workspaces[0].id;
+                window.setWorkspaces(workspacesJson, activeId);
+            } else {
+                console.log('⚠️ No workspaces found');
+            }
+        } catch (err) {
+            console.error('❌ Error loading workspaces:', err);
+        }
+    }
+
+    window.toggleWorkspaceMenu = () => {
+        document.getElementById('workspace-menu').classList.toggle('hidden');
+    }
+
+    window.switchWorkspace = async (workspaceId) => {
+        console.log('🔄 Switching to workspace:', workspaceId);
+        document.getElementById('workspace-menu').classList.add('hidden');
+        await DotNet.invokeMethodAsync('OkCloud.Client', 'SwitchWorkspace', workspaceId);
+    }
+
+    // New workspace management functions
+    window.manageWorkspace = (workspaceId) => {
+        console.log('🔧 Managing workspace:', workspaceId);
+        // For now, show a placeholder - this would open workspace settings
+        showNotification('Workspace management coming soon!', 'info');
+    }
+
+    window.createNewWorkspace = () => {
+        console.log('➕ Creating new workspace');
+        // For now, show a placeholder - this would open create workspace modal
+        showNotification('Create workspace feature coming soon!', 'info');
+    }
+
+    window.upgradeWorkspacePlan = () => {
+        console.log('⬆️ Upgrading workspace plan');
+        // For now, show a placeholder - this would open upgrade modal
+        showNotification('Upgrade plan feature coming soon!', 'info');
+    }
+
+    window.toggleUserMenu = () => { document.getElementById('user-menu').classList.toggle('hidden'); }
+    window.logout = async () => { await DotNet.invokeMethodAsync('OkCloud.Client', 'Logout'); }
+    
+    // Handle session expiry errors
+    window.handleSessionExpiry = async () => {
+        console.log('🚪 Session expired, logging out...');
+        await DotNet.invokeMethodAsync('OkCloud.Client', 'Logout');
+    }
+    
+    // Show emergency logout when there are connection issues
+    window.showEmergencyLogout = () => {
+        const emergencyLogout = document.getElementById('emergency-logout');
+        if (emergencyLogout) {
+            emergencyLogout.classList.remove('hidden');
+        }
+    }
+    
+    // Hide emergency logout
+    window.hideEmergencyLogout = () => {
+        const emergencyLogout = document.getElementById('emergency-logout');
+        if (emergencyLogout) {
+            emergencyLogout.classList.add('hidden');
+        }
+    }
+    
+    // Override alert to handle session expiry
+    const originalAlert = window.alert;
+    window.alert = function(message) {
+        if (message && (message.includes('Session Expired') || message.includes('Please login again') || message.includes('Unauthorized'))) {
+            console.log('🚨 Session expired detected, auto-logging out...');
+            // Show a better message
+            showNotification('Session expired. Redirecting to login...', 'warning');
+            // Auto logout after a short delay
+            setTimeout(() => {
+                window.handleSessionExpiry();
+            }, 1500);
+            return;
+        }
+        originalAlert(message);
+    }
+    
+    // Global error handler for fetch requests
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        try {
+            const response = await originalFetch(...args);
+            if (response.status === 401 || response.status === 403) {
+                console.log('🚨 API returned 401/403, session expired');
+                showNotification('Session expired. Please login again.', 'error');
+                setTimeout(() => {
+                    window.handleSessionExpiry();
+                }, 1500);
+            }
+            return response;
+        } catch (error) {
+            console.error('Fetch error:', error);
+            throw error;
+        }
+    }
+    
+    window.openSyncSettings = async () => {
+        await DotNet.invokeMethodAsync('OkCloud.Client', 'OpenSyncSettings');
+    }
+    
+    window.openSettings = () => {
+        window.location.href = '/settings';
+    }
+    
+    // Sidebar toggle for mobile/tablet
+    window.toggleSidebar = () => {
+        const sidebar = document.getElementById('sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        
+        if (sidebar && backdrop) {
+            sidebar.classList.toggle('show');
+            backdrop.classList.toggle('show');
+        }
+    }
+    
+    window.updateSyncStatus = (isSyncing) => {
+        const statusEl = document.getElementById('sync-status');
+        if (isSyncing) {
+            statusEl.innerHTML = '<i class="fa-solid fa-sync fa-spin text-[#ff5500]"></i><span>Syncing...</span>';
+        } else {
+            statusEl.innerHTML = '<i class="fa-solid fa-circle-check text-green-500"></i><span>Synced</span>';
+        }
+    }
+    
+    window.updateOfflineStatus = (isOffline) => {
+        const offlineEl = document.getElementById('offline-status');
+        const syncEl = document.getElementById('sync-status');
+        
+        if (isOffline) {
+            if (offlineEl) offlineEl.classList.remove('hidden');
+            if (syncEl) syncEl.classList.add('hidden');
+            
+            // Update view title to show offline
+            const viewTitle = document.getElementById('view-title');
+            if (viewTitle && !viewTitle.textContent.includes('(Offline)')) {
+                viewTitle.textContent += ' (Offline)';
+            }
+        } else {
+            if (offlineEl) offlineEl.classList.add('hidden');
+            if (syncEl) syncEl.classList.remove('hidden');
+            
+            // Remove offline from title
+            const viewTitle = document.getElementById('view-title');
+            if (viewTitle) {
+                viewTitle.textContent = viewTitle.textContent.replace(' (Offline)', '');
+            }
+        }
+    }
+    
+    // Profile Modal Functions
+    window.openProfileModal = () => {
+        // Close user menu
+        document.getElementById('user-menu').classList.add('hidden');
+        
+        // Populate profile data
+        const userName = document.getElementById('user-name').textContent || 'User';
+        const userEmail = currentUser?.email || 'user.example.com';
+        const userAvatar = document.getElementById('user-avatar').textContent || userName.charAt(0).toUpperCase();
+        
+        document.getElementById('profile-name-input').value = userName;
+        document.getElementById('profile-email').textContent = userEmail;
+        document.getElementById('profile-avatar').textContent = userAvatar;
+        
+        // Show modal
+        document.getElementById('profile-modal').classList.remove('hidden');
+        
+        // Focus on name input
+        setTimeout(() => {
+            document.getElementById('profile-name-input').focus();
+            document.getElementById('profile-name-input').select();
+        }, 100);
+    }
+    
+    window.closeProfileModal = () => {
+        document.getElementById('profile-modal').classList.add('hidden');
+    }
+    
+    window.saveProfile = async () => {
+        const newName = document.getElementById('profile-name-input').value.trim();
+        
+        if (!newName) {
+            showNotification('Please enter a name', 'warning');
+            return;
+        }
+        
+        try {
+            // Update UI immediately
+            document.getElementById('user-name').textContent = newName;
+            document.getElementById('user-avatar').textContent = newName.charAt(0).toUpperCase();
+            document.getElementById('profile-avatar').textContent = newName.charAt(0).toUpperCase();
+            
+            // Save to local storage for persistence
+            localStorage.setItem('user_display_name', newName);
+            
+            // Close modal
+            closeProfileModal();
+            showNotification('Profile updated successfully!', 'success');
+            
+            // TODO: Call backend API to save profile changes
+            // await DotNet.invokeMethodAsync('OkCloud.Client', 'UpdateUserProfile', newName);
+        } catch (error) {
+            console.error('Error saving profile:', error);
+            showNotification('Failed to save profile changes', 'error');
+        }
+    }
+    
+    window.removeProfileImage = () => {
+        // Reset to default avatar (first letter of name)
+        const userName = document.getElementById('profile-name-input').value || 'User';
+        const firstLetter = userName.charAt(0).toUpperCase();
+        
+        document.getElementById('profile-avatar').textContent = firstLetter;
+        document.getElementById('user-avatar').textContent = firstLetter;
+        
+        showNotification('Profile image removed', 'info');
+    }
+    
+    // Theme Toggle Functions
+    let isDarkMode = true; // Default to dark mode
+    
+    window.toggleTheme = () => {
+        // Close user menu
+        document.getElementById('user-menu').classList.add('hidden');
+        
+        isDarkMode = !isDarkMode;
+        
+        const body = document.body;
+        const themeIcon = document.getElementById('theme-icon');
+        const themeText = document.getElementById('theme-text');
+        
+        if (isDarkMode) {
+            // Switch to Dark Mode
+            body.classList.remove('light-mode');
+            body.classList.add('dark-mode');
+            themeIcon.className = 'fa-solid fa-sun mr-2';
+            themeText.textContent = 'Light Mode';
+            
+            // Update CSS variables for dark mode
+            document.documentElement.style.setProperty('--bg-primary', '#0f0f0f');
+            document.documentElement.style.setProperty('--bg-secondary', '#1a1a1a');
+            document.documentElement.style.setProperty('--bg-tertiary', '#2a2a2a');
+            document.documentElement.style.setProperty('--text-primary', '#ffffff');
+            document.documentElement.style.setProperty('--text-secondary', '#9ca3af');
+            document.documentElement.style.setProperty('--border-color', '#2a2a2a');
+            
+            showNotification('Switched to Dark Mode', 'success');
+        } else {
+            // Switch to Light Mode
+            body.classList.remove('dark-mode');
+            body.classList.add('light-mode');
+            themeIcon.className = 'fa-solid fa-moon mr-2';
+            themeText.textContent = 'Dark Mode';
+            
+            // Update CSS variables for light mode
+            document.documentElement.style.setProperty('--bg-primary', '#ffffff');
+            document.documentElement.style.setProperty('--bg-secondary', '#f8fafc');
+            document.documentElement.style.setProperty('--bg-tertiary', '#e2e8f0');
+            document.documentElement.style.setProperty('--text-primary', '#1f2937');
+            document.documentElement.style.setProperty('--text-secondary', '#6b7280');
+            document.documentElement.style.setProperty('--border-color', '#e5e7eb');
+            
+            showNotification('Switched to Light Mode', 'success');
+        }
+        
+        // Save theme preference
+        localStorage.setItem('theme_mode', isDarkMode ? 'dark' : 'light');
+        
+        // Apply theme to all elements
+        applyThemeToElements();
+    }
+    
+    window.applyThemeToElements = () => {
+        const body = document.body;
+        
+        if (isDarkMode) {
+            // Dark Mode - Reset to original dark colors by removing ALL inline styles
+            body.style.backgroundColor = '';
+            body.style.color = '';
+            
+            // Reset ALL elements to their original CSS classes
+            document.querySelectorAll('*').forEach(el => {
+                // Remove ALL inline styles that were applied by light mode
+                el.style.backgroundColor = '';
+                el.style.color = '';
+                el.style.borderColor = '';
+                
+                // Remove any light mode specific classes
+                el.classList.remove('light-text', 'light-bg', 'light-border');
+            });
+            
+            console.log('🌙 Dark mode: Reset all inline styles to use original CSS');
+        } else {
+            // Light Mode - Apply comprehensive light theme
+            body.style.backgroundColor = '#ffffff';
+            body.style.color = '#1f2937';
+            
+            // Apply light theme to all elements
+            document.querySelectorAll('*').forEach(el => {
+                const classList = Array.from(el.classList);
+                
+                // Background colors
+                if (classList.some(c => c.includes('bg-[#0f0f0f]') || c.includes('bg-black'))) {
+                    el.style.backgroundColor = '#ffffff';
+                }
+                if (classList.some(c => c.includes('bg-[#1a1a1a]'))) {
+                    el.style.backgroundColor = '#f8fafc';
+                }
+                if (classList.some(c => c.includes('bg-[#2a2a2a]'))) {
+                    el.style.backgroundColor = '#e2e8f0';
+                }
+                
+                // Text colors - Make them much darker for better contrast
+                if (classList.some(c => c.includes('text-white'))) {
+                    el.style.color = '#1f2937'; // Very dark gray instead of black
+                }
+                if (classList.some(c => c.includes('text-gray-100'))) {
+                    el.style.color = '#374151'; // Dark gray
+                }
+                if (classList.some(c => c.includes('text-gray-200'))) {
+                    el.style.color = '#4b5563'; // Medium-dark gray
+                }
+                if (classList.some(c => c.includes('text-gray-300'))) {
+                    el.style.color = '#6b7280'; // Medium gray
+                }
+                if (classList.some(c => c.includes('text-gray-400'))) {
+                    el.style.color = '#6b7280'; // Medium gray (darker than original)
+                }
+                if (classList.some(c => c.includes('text-gray-500'))) {
+                    el.style.color = '#6b7280'; // Medium gray
+                }
+                
+                // Border colors
+                if (classList.some(c => c.includes('border-[#2a2a2a]'))) {
+                    el.style.borderColor = '#d1d5db';
+                }
+                
+                // Special elements that need extra attention
+                if (el.id === 'view-title') {
+                    el.style.color = '#1f2937';
+                    el.style.fontWeight = 'bold';
+                }
+                
+                // File list headers
+                if (el.id === 'list-header') {
+                    el.style.backgroundColor = '#f8fafc';
+                    el.style.color = '#374151';
+                }
+                
+                // Make sure all text in file rows is visible
+                if (el.classList.contains('file-row')) {
+                    el.style.backgroundColor = '#ffffff';
+                    el.style.borderColor = '#e5e7eb';
+                }
+                
+                // File names and metadata
+                if (classList.some(c => c.includes('text-sm') || c.includes('text-xs'))) {
+                    if (classList.some(c => c.includes('text-gray'))) {
+                        el.style.color = '#4b5563'; // Darker gray for better readability
+                    }
+                }
+                
+                // Sidebar
+                if (el.id === 'sidebar') {
+                    el.style.backgroundColor = '#f8fafc';
+                    el.style.borderColor = '#e5e7eb';
+                }
+                
+                // Navigation items
+                if (el.classList.contains('nav-item')) {
+                    el.style.color = '#6b7280';
+                }
+                
+                // Buttons and interactive elements
+                if (el.tagName === 'BUTTON' && !classList.some(c => c.includes('bg-[#ff5500]'))) {
+                    if (classList.some(c => c.includes('text-gray'))) {
+                        el.style.color = '#4b5563';
+                    }
+                }
+            });
+        }
+    }
+    
+    // Initialize theme on page load
+    window.initializeTheme = () => {
+        console.log('🎨 Initializing theme...');
+        
+        const savedTheme = localStorage.getItem('theme_mode');
+        if (savedTheme) {
+            isDarkMode = savedTheme === 'dark';
+            console.log('📱 Loaded saved theme:', savedTheme);
+        } else {
+            // Default to dark mode
+            isDarkMode = true;
+            console.log('🌙 Using default dark mode');
+        }
+        
+        // Set initial theme icons
+        const themeIcon = document.getElementById('theme-icon');
+        const themeText = document.getElementById('theme-text');
+        
+        if (themeIcon && themeText) {
+            if (isDarkMode) {
+                themeIcon.className = 'fa-solid fa-sun mr-2';
+                themeText.textContent = 'Light Mode';
+            } else {
+                themeIcon.className = 'fa-solid fa-moon mr-2';
+                themeText.textContent = 'Dark Mode';
+            }
+        }
+        
+        // ALWAYS apply theme styles regardless of mode
+        applyThemeToElements();
+        console.log('✅ Theme applied:', isDarkMode ? 'Dark' : 'Light');
+    }
+    
+    // Initialize theme multiple times to ensure it works
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('📄 DOM loaded, initializing theme...');
+        initializeTheme();
+    });
+    
+    // Also initialize when the dashboard becomes visible
+    window.addEventListener('load', () => {
+        console.log('🌐 Window loaded, initializing theme...');
+        setTimeout(() => {
+            initializeTheme();
+            
+            // Force another application after a longer delay to catch dynamically loaded content
+            setTimeout(() => {
+                console.log('🔄 Re-applying theme after delay...');
+                applyThemeToElements();
+            }, 2000);
+        }, 500);
+    });
+    
+    // Also initialize when files are rendered (dashboard becomes visible)
+    const originalRenderFiles = window.renderFiles;
+    window.renderFiles = function(jsonFiles) {
+        console.log('📁 Files rendered, applying theme...');
+        originalRenderFiles(jsonFiles);
+        
+        // Apply theme after files are rendered
+        setTimeout(() => {
+            initializeTheme();
+        }, 100);
+    };
+    
+    // Workspace Management Functions
+    let currentManageWorkspaceId = null;
+    let currentManageWorkspaceName = '';
+    let isCurrentWorkspaceActive = false;
+    
+    window.openWorkspaceManageModal = () => {
+        // Get current workspace info
+        const workspaceName = document.getElementById('workspace-name').textContent || 'Default';
+        const workspaceId = window.currentWorkspaceId || 0; // Assuming we have this global variable
+        
+        currentManageWorkspaceId = workspaceId;
+        currentManageWorkspaceName = workspaceName;
+        isCurrentWorkspaceActive = true;
+        
+        // Show manage modal
+        document.getElementById('workspace-manage-modal').classList.remove('hidden');
+    };
+    
+    window.showWorkspaceManageMenu = (event, workspaceId, workspaceName, isActive) => {
+        event.stopPropagation();
+        
+        // Store current workspace info
+        currentManageWorkspaceId = workspaceId;
+        currentManageWorkspaceName = workspaceName;
+        isCurrentWorkspaceActive = isActive;
+        
+        // Close workspace menu
+        document.getElementById('workspace-menu').classList.add('hidden');
+        
+        // Show manage modal
+        document.getElementById('workspace-manage-modal').classList.remove('hidden');
+    };
+    
+    window.closeWorkspaceManageModal = () => {
+        document.getElementById('workspace-manage-modal').classList.add('hidden');
+        currentManageWorkspaceId = null;
+        currentManageWorkspaceName = '';
+        isCurrentWorkspaceActive = false;
+    };
+    
+    window.manageWorkspaceMembers = () => {
+        closeWorkspaceManageModal();
+        showNotification('Workspace members management coming soon!', 'info');
+        // TODO: Implement members management
+        // This would show a modal with current members, invite options, etc.
+    };
+    
+    window.renameWorkspace = () => {
+        // Workspace renaming disabled in sync mode
+        closeWorkspaceManageModal();
+        showNotification('Workspace renaming is disabled in sync mode. Please use the web interface to rename workspaces.', 'info');
+        console.log('🏢 Workspace renaming disabled - sync-only mode');
+    };
+    
+    window.closeWorkspaceRenameModal = () => {
+        document.getElementById('workspace-rename-modal').classList.add('hidden');
+    };
+    
+    window.submitWorkspaceRename = async () => {
+        const newName = document.getElementById('workspace-rename-input').value.trim();
+        
+        if (!newName) {
+            showNotification('Please enter a workspace name', 'warning');
+            return;
+        }
+        
+        if (newName === currentManageWorkspaceName) {
+            closeWorkspaceRenameModal();
+            return;
+        }
+        
+        try {
+            // Call backend to rename workspace
+            const success = await DotNet.invokeMethodAsync('OkCloud.Client', 'RenameWorkspace', currentManageWorkspaceId, newName);
+            
+            if (success) {
+                showNotification(`Workspace renamed to "${newName}"`, 'success');
+                closeWorkspaceRenameModal();
+                
+                // Refresh workspaces
+                await loadWorkspaces();
+                
+                // If this was the active workspace, update the display
+                if (isCurrentWorkspaceActive) {
+                    document.getElementById('workspace-name').textContent = newName;
+                }
+            } else {
+                showNotification('Failed to rename workspace', 'error');
+            }
+        } catch (error) {
+            console.error('Error renaming workspace:', error);
+            showNotification('Error renaming workspace', 'error');
+        }
+    };
+    
+    window.deleteWorkspace = () => {
+        if (!currentManageWorkspaceId) return;
+        
+        closeWorkspaceManageModal();
+        
+        // Show confirmation
+        showConfirmModal(
+            'Delete Workspace?',
+            `Are you sure you want to permanently delete "${currentManageWorkspaceName}"? This action cannot be undone and will delete all files in this workspace.`,
+            'Delete Workspace',
+            async () => {
+                try {
+                    // Call backend to delete workspace
+                    const success = await DotNet.invokeMethodAsync('OkCloud.Client', 'DeleteWorkspace', currentManageWorkspaceId);
+                    
+                    if (success) {
+                        showNotification(`Workspace "${currentManageWorkspaceName}" deleted`, 'success');
+                        
+                        // If this was the active workspace, switch to Default
+                        if (isCurrentWorkspaceActive) {
+                            await switchWorkspace(0); // Switch to Default workspace
+                        }
+                        
+                        // Refresh workspaces
+                        await loadWorkspaces();
+                    } else {
+                        showNotification('Failed to delete workspace', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error deleting workspace:', error);
+                    showNotification('Error deleting workspace', 'error');
+                }
+            }
+        );
+    };
+    
+    // Load files from server
+    window.loadFiles = async () => {
+        try {
+            const files = await DotNet.invokeMethodAsync('OkCloud.Client', 'LoadFiles');
+            allFiles = JSON.parse(files);
+            renderFileList(allFiles);
+        } catch (error) {
+            console.error('❌ Error loading files:', error);
+            showNotification('Error loading files', 'error');
+        }
+    };
+    
+    // Load workspaces from server
+    window.loadWorkspaces = async () => {
+        try {
+            const workspacesJson = await DotNet.invokeMethodAsync('OkCloud.Client', 'GetWorkspaces');
+            const workspaces = JSON.parse(workspacesJson);
+            
+            // Update workspace list in UI
+            const workspaceList = document.getElementById('workspace-list');
+            if (workspaceList) {
+                workspaceList.innerHTML = '';
+                
+                workspaces.forEach(workspace => {
+                    const isActive = workspace.id === (window.currentWorkspaceId || 0);
+                    const workspaceItem = document.createElement('div');
+                    workspaceItem.className = `workspace-item ${isActive ? 'active' : ''}`;
+                    
+                    // Create workspace item with manage button
+                    const workspaceContent = document.createElement('div');
+                    workspaceContent.className = 'flex items-center justify-between px-3 py-2 hover:bg-[#2a2a2a] rounded-lg cursor-pointer';
+                    
+                    // Left side - workspace info (clickable to switch)
+                    const workspaceInfo = document.createElement('div');
+                    workspaceInfo.className = 'flex items-center gap-3 flex-1';
+                    workspaceInfo.onclick = () => switchWorkspace(workspace.id);
+                    
+                    // Add checkmark for active workspace
+                    const checkmark = isActive ? '<i class="fa-solid fa-check text-[#ff5500] text-sm mr-2"></i>' : '';
+                    
+                    workspaceInfo.innerHTML = `
+                        ${checkmark}
+                        <div>
+                            <div class="text-white text-sm font-medium">${workspace.name}</div>
+                            <div class="text-gray-400 text-xs">${workspace.isDefault ? 'Personal workspace' : workspace.memberCount ? `${workspace.memberCount} members` : 'Team workspace'}</div>
+                        </div>
+                    `;
+                    
+                    workspaceContent.appendChild(workspaceInfo);
+                    
+                    workspaceItem.appendChild(workspaceContent);
+                    workspaceList.appendChild(workspaceItem);
+                });
+            }
+            
+            console.log('✅ Workspaces loaded:', workspaces.length);
+        } catch (error) {
+            console.error('❌ Error loading workspaces:', error);
+        }
+    };
+    
+    // Switch to a different workspace
+    window.switchWorkspace = async (workspaceId) => {
+        try {
+            console.log(`🔄 Switching to workspace: ${workspaceId}`);
+            
+            // Update current workspace ID
+            window.currentWorkspaceId = workspaceId;
+            
+            // Call backend to switch workspace
+            const success = await DotNet.invokeMethodAsync('OkCloud.Client', 'SwitchWorkspace', workspaceId);
+            
+            if (success) {
+                // Get workspace info to update UI
+                const workspacesJson = await DotNet.invokeMethodAsync('OkCloud.Client', 'GetWorkspaces');
+                const workspaces = JSON.parse(workspacesJson);
+                const currentWorkspace = workspaces.find(w => w.id === workspaceId) || { id: 0, name: 'Default', isDefault: true };
+                
+                // Update UI
+                document.getElementById('workspace-name').textContent = currentWorkspace.name;
+                document.getElementById('workspace-desc').textContent = currentWorkspace.isDefault ? 'Personal workspace' : 'Team workspace';
+                
+                // Close workspace menu
+                document.getElementById('workspace-menu').classList.add('hidden');
+                
+                // Reload files for new workspace
+                await loadFiles();
+                
+                // Refresh workspace list to update active state
+                await loadWorkspaces();
+                
+                showNotification(`Switched to ${currentWorkspace.name}`, 'success');
+            } else {
+                showNotification('Failed to switch workspace', 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error switching workspace:', error);
+            showNotification('Error switching workspace', 'error');
+        }
+    };
+    
+    // Toggle workspace menu
+    window.toggleWorkspaceMenu = () => {
+        const menu = document.getElementById('workspace-menu');
+        if (menu) {
+            menu.classList.toggle('hidden');
+            
+            // Load workspaces when menu is opened
+            if (!menu.classList.contains('hidden')) {
+                loadWorkspaces();
+            }
+        }
+    };
+
+    // Set current workspace in UI
+    window.setCurrentWorkspace = (workspaceId, workspaceName, workspaceDesc) => {
+        window.currentWorkspaceId = workspaceId;
+        document.getElementById('workspace-name').textContent = workspaceName;
+        document.getElementById('workspace-desc').textContent = workspaceDesc;
+        console.log(`🏢 Current workspace set to: ${workspaceName} (ID: ${workspaceId})`);
+    };
+
+    // Update current workspace ID
+    window.updateCurrentWorkspace = (workspaceId) => {
+        window.currentWorkspaceId = workspaceId;
+        console.log(`🏢 Current workspace updated to: ${workspaceId}`);
+    };
+
+    // Create new workspace
+    window.createNewWorkspace = () => {
+        // Close workspace menu
+        document.getElementById('workspace-menu').classList.add('hidden');
+        
+        // Show create workspace modal
+        document.getElementById('create-workspace-modal').classList.remove('hidden');
+        
+        // Focus on name input
+        setTimeout(() => {
+            const input = document.getElementById('create-workspace-name');
+            input.focus();
+            input.onkeypress = (e) => { if (e.key === 'Enter') submitCreateWorkspace(); };
+        }, 100);
+    };
+
+    window.closeCreateWorkspaceModal = () => {
+        document.getElementById('create-workspace-modal').classList.add('hidden');
+        document.getElementById('create-workspace-name').value = '';
+    };
+
+    window.submitCreateWorkspace = async () => {
+        const name = document.getElementById('create-workspace-name').value.trim();
+        
+        if (!name) {
+            showNotification('Please enter a workspace name', 'warning');
+            return;
+        }
+        
+        try {
+            const success = await DotNet.invokeMethodAsync('OkCloud.Client', 'CreateWorkspace', name);
+            
+            if (success) {
+                showNotification(`Workspace "${name}" created successfully`, 'success');
+                closeCreateWorkspaceModal();
+                
+                // Refresh workspaces
+                await loadWorkspaces();
+            } else {
+                showNotification('Failed to create workspace', 'error');
+            }
+        } catch (error) {
+            console.error('Error creating workspace:', error);
+            showNotification('Error creating workspace', 'error');
+        }
+    };
+</script>
+
+
+@code {
+    private static Home? _instance;
+    private DotNetObjectReference<Home>? _objRef;
+    
+    private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    protected override async void OnInitialized()
+    {
+        _instance = this;
+        _objRef = DotNetObjectReference.Create(this);
+        
+        // Subscribe to connectivity changes
+        OfflineMgr.OnConnectivityChanged += async (isOffline) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await JS.InvokeVoidAsync("window.updateOfflineStatus", isOffline);
+            });
+        };
+        
+        // Subscribe to logout event
+        Services.AppBridge.OnLogout += async () =>
+        {
+            await InvokeAsync(async () =>
+            {
+                System.Diagnostics.Debug.WriteLine("🔄 Logout event received, reloading page");
+                await JS.InvokeVoidAsync("location.reload");
+            });
+        };
+        
+        Services.AppBridge.OnTokenReceived += async (token) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                try
+                {
+                    await JS.InvokeVoidAsync("window.onLoginSuccess");
+                    await Api.SetAuthTokenAsync(token);
+                    
+                    bool isValid = await Api.ValidateTokenAsync();
+                    if (!isValid)
+                    {
+                        await JS.InvokeVoidAsync("alert", "Token validation failed.");
+                        await JS.InvokeVoidAsync("window.resetAuth");
+                        return;
+                    }
+
+                    // Check if sync is configured
+                    var syncService = Application.Current?.Handler?.MauiContext?.Services.GetService<SyncService>();
+                    var isSyncConfigured = syncService != null && await syncService.IsSyncConfiguredAsync();
+                    
+                    if (!isSyncConfigured)
+                    {
+                        // Show sync setup page - it will handle the sync and close itself
+                        await Application.Current.MainPage.Navigation.PushModalAsync(new SyncSetupPage());
+                        // Don't continue loading here - sync page will trigger reload when done
+                        return;
+                    }
+
+                    // Load files
+                    var files = await Api.GetFilesAsync();
+                    var json = JsonSerializer.Serialize(files, JsonOptions);
+                    await JS.InvokeVoidAsync("window.renderFiles", json);
+
+                    // Load user info
+                    var user = await Api.GetCurrentUserAsync();
+                    if (user != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"👤 User loaded: {user.DisplayName} ({user.Email})");
+                        await JS.InvokeVoidAsync("window.setUserInfo", user.DisplayName, user.Email);
+                        
+                        // Load workspaces - try from user object first, then API call
+                        List<Workspace> workspaces = null;
+                        int? currentWorkspaceId = user.DefaultWorkspaceId;
+                        
+                        if (user.Workspaces != null && user.Workspaces.Count > 0)
+                        {
+                            workspaces = user.Workspaces;
+                            System.Diagnostics.Debug.WriteLine($"📋 Found {workspaces.Count} workspaces in user object");
+                        }
+                        else
+                        {
+                            // Try loading workspaces separately
+                            System.Diagnostics.Debug.WriteLine("📋 No workspaces in user object, loading separately...");
+                            workspaces = await Api.GetWorkspacesAsync();
+                            System.Diagnostics.Debug.WriteLine($"📋 Loaded {workspaces?.Count ?? 0} workspaces from API");
+                        }
+                        
+                        // Always ensure we have a Default workspace
+                        if (workspaces == null) workspaces = new List<Workspace>();
+                        
+                        // Ensure Default workspace is always present
+                        var hasDefaultWorkspace = workspaces.Any(w => w.IsDefault || w.Name.Equals("Default", StringComparison.OrdinalIgnoreCase));
+                        if (!hasDefaultWorkspace)
+                        {
+                            System.Diagnostics.Debug.WriteLine("➕ Adding missing Default workspace");
+                            workspaces.Insert(0, new Workspace { Id = 0, Name = "Default", IsDefault = true });
+                        }
+                        
+                        if (workspaces.Count > 0)
+                        {
+                            // Debug workspace information
+                            System.Diagnostics.Debug.WriteLine($"🔍 User DefaultWorkspaceId: {currentWorkspaceId}");
+                            foreach (var ws in workspaces)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"📋 Workspace: ID={ws.Id}, Name={ws.Name}, IsDefault={ws.IsDefault}");
+                            }
+                            
+                            // WORKSPACE PERSISTENCE FIX: Try to restore last active workspace
+                            var lastActiveWorkspaceIdStr = await SecureStorage.Default.GetAsync("last_active_workspace_id");
+                            int activeWorkspaceId = 0;
+                            
+                            if (!string.IsNullOrEmpty(lastActiveWorkspaceIdStr) && int.TryParse(lastActiveWorkspaceIdStr, out var lastActiveId))
+                            {
+                                // Check if the saved workspace still exists
+                                var savedWorkspace = workspaces.FirstOrDefault(w => w.Id == lastActiveId);
+                                if (savedWorkspace != null)
+                                {
+                                    activeWorkspaceId = lastActiveId;
+                                    System.Diagnostics.Debug.WriteLine($"🔄 Restored last active workspace: {activeWorkspaceId} ({savedWorkspace.Name})");
+                                }
+                                else
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"⚠️ Saved workspace {lastActiveId} no longer exists, falling back to default");
+                                }
+                            }
+                            
+                            // If no saved workspace or it doesn't exist, use default logic
+                            if (activeWorkspaceId == 0 || !workspaces.Any(w => w.Id == activeWorkspaceId))
+                            {
+                                var defaultWorkspace = workspaces.FirstOrDefault(w => w.IsDefault) ?? workspaces.FirstOrDefault(w => w.Name.Equals("Default", StringComparison.OrdinalIgnoreCase));
+                                activeWorkspaceId = defaultWorkspace?.Id ?? 0;
+                                System.Diagnostics.Debug.WriteLine($"🎯 Using default workspace: {activeWorkspaceId}");
+                            }
+                            
+                            // Set current workspace in ApiService
+                            ApiService.CurrentWorkspaceId = activeWorkspaceId;
+                            
+                            // WORKSPACE PERSISTENCE FIX: Save initial workspace to storage
+                            await SecureStorage.Default.SetAsync("last_active_workspace_id", activeWorkspaceId.ToString());
+                            System.Diagnostics.Debug.WriteLine($"💾 Saved initial workspace {activeWorkspaceId} to persistent storage");
+                            
+                            // Initialize workspace UI
+                            var activeWorkspace = workspaces.FirstOrDefault(w => w.Id == activeWorkspaceId);
+                            if (activeWorkspace != null)
+                            {
+                                await JS.InvokeVoidAsync("window.setCurrentWorkspace", activeWorkspace.Id, activeWorkspace.Name, activeWorkspace.IsDefault ? "Personal workspace" : "Team workspace");
+                                System.Diagnostics.Debug.WriteLine($"✅ Workspace initialized: {activeWorkspace.Name} (ID: {activeWorkspaceId})");
+                                
+                                // CRITICAL: Switch sync service to correct workspace
+                                if (syncService != null)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"🔄 Switching SyncService to workspace {activeWorkspaceId}");
+                                    await syncService.SwitchWorkspaceAsync(activeWorkspaceId);
+                                }
+                            }
+                            else
+                            {
+                                System.Diagnostics.Debug.WriteLine($"⚠️ Could not find workspace with ID {activeWorkspaceId}");
+                            }
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine("⚠️ No workspaces found for user");
+                            // Set default workspace
+                            ApiService.CurrentWorkspaceId = 0;
+                            
+                            // WORKSPACE PERSISTENCE FIX: Save default workspace to storage
+                            await SecureStorage.Default.SetAsync("last_active_workspace_id", "0");
+                            System.Diagnostics.Debug.WriteLine($"💾 Saved default workspace 0 to persistent storage");
+                            
+                            await JS.InvokeVoidAsync("window.setCurrentWorkspace", 0, "Default", "Personal workspace");
+                        }
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("⚠️ User is null!");
+                    }
+
+                    // Load storage usage
+                    var usage = await Api.GetSpaceUsageAsync();
+                    if (usage != null)
+                    {
+                        await JS.InvokeVoidAsync("window.updateStorageUI", usage.Used, usage.Available);
+                    }
+                    
+                    // Start FileWatcher and Periodic Sync if sync is configured
+                    var fileWatcher = Application.Current?.Handler?.MauiContext?.Services.GetService<FileWatcherService>();
+                    if (fileWatcher != null)
+                    {
+                        await fileWatcher.StartWatchingAsync();
+                    }
+                    
+                    // Start periodic sync to download new files from cloud
+                    if (syncService != null && isSyncConfigured)
+                    {
+                        System.Diagnostics.Debug.WriteLine("🔄 Starting periodic sync for full account synchronization");
+                        syncService.StartPeriodicSync();
+                    }
+                    
+                    if (fileWatcher != null)
+                    {
+                        
+                        // Subscribe to file events to refresh UI
+                        fileWatcher.OnFileAdded += async (filePath) =>
+                        {
+                            await InvokeAsync(async () =>
+                            {
+                                System.Diagnostics.Debug.WriteLine($"🔔 File added notification: {filePath}");
+                                await RefreshFiles();
+                            });
+                        };
+                        
+                        fileWatcher.OnFileDeleted += async (filePath) =>
+                        {
+                            await InvokeAsync(async () =>
+                            {
+                                System.Diagnostics.Debug.WriteLine($"🔔 File deleted notification: {filePath}");
+                                await RefreshFiles();
+                            });
+                        };
+                        
+                        fileWatcher.OnFileRenamed += async (oldPath, newPath) =>
+                        {
+                            await InvokeAsync(async () =>
+                            {
+                                System.Diagnostics.Debug.WriteLine($"🔔 File renamed notification: {oldPath} → {newPath}");
+                                await RefreshFiles();
+                            });
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"❌ Error: {ex.Message}");
+                    await JS.InvokeVoidAsync("alert", $"Error: {ex.Message}");
+                    await JS.InvokeVoidAsync("window.resetAuth");
+                }
+            });
+        };
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+        
+        if (firstRender)
+        {
+            System.Diagnostics.Debug.WriteLine("🏠 Home component first render - checking sync configuration...");
+            
+            // Register this instance for JS callbacks
+            await JS.InvokeVoidAsync("window.registerBlazorInstance", _objRef);
+            
+            // Check if auto-login is pending (from App.xaml.cs startup check)
+            var autoLoginPending = await SecureStorage.Default.GetAsync("auto_login_pending");
+            if (autoLoginPending == "true")
+            {
+                System.Diagnostics.Debug.WriteLine("🔔 Auto-login pending detected, triggering login flow...");
+                
+                // Clear the flag
+                SecureStorage.Default.Remove("auto_login_pending");
+                
+                // Get saved credentials
+                var token = await SecureStorage.Default.GetAsync("auth_token") ?? "";
+                var cookies = await SecureStorage.Default.GetAsync("auth_cookies") ?? "";
+                
+                // Trigger the login flow
+                await Services.AppBridge.SaveTokenAndNotify(token, cookies);
+            }
+            
+            // WORKSPACE PERSISTENCE FIX: Restore last active workspace before initializing
+            await RestoreLastActiveWorkspace();
+            
+            // Check if sync is already configured and start FileWatcher if needed
+            await InitializeFileWatcherIfNeeded();
+        }
+    }
+
+    public void Dispose()
+    {
+        _objRef?.Dispose();
+        if (_instance == this) _instance = null;
+        
+        // Stop FileWatcher
+        FileWatcher?.StopWatching();
+    }
+
+    // Instance method for loading views - called from JS
+    [JSInvokable("LoadViewInstance")]
+    public async Task LoadViewInstance(string view)
+    {
+        System.Diagnostics.Debug.WriteLine($"🔄 LoadViewInstance called with: {view}");
+        
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                System.Diagnostics.Debug.WriteLine($"📂 Fetching files for view: {view}");
+                List<FileEntry> files = view switch
+                {
+                    "starred" => await OfflineMgr.GetStarredFilesAsync(),
+                    "recent" => OfflineMgr.IsOffline ? new List<FileEntry>() : await Api.GetRecentFilesAsync(),
+                    "shared" => OfflineMgr.IsOffline ? new List<FileEntry>() : await Api.GetSharedFilesAsync(),
+                    "trash" => OfflineMgr.IsOffline ? new List<FileEntry>() : await Api.GetTrashFilesAsync(),
+                    _ => await OfflineMgr.GetFilesAsync()
+                };
+                
+                System.Diagnostics.Debug.WriteLine($"✅ Got {files.Count} files for {view}");
+                
+                // Check if trash has files and notify user to empty it to free up space
+                if (view == "trash" && files.Count > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"🗑️ Trash contains {files.Count} file(s) - notifying user to empty it");
+                    await JS.InvokeVoidAsync("showTrashNotification", files.Count);
+                }
+                
+                var jsonOptions = new JsonSerializerOptions 
+                { 
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    WriteIndented = false
+                };
+                var json = JsonSerializer.Serialize(files, jsonOptions);
+                await JS.InvokeVoidAsync("window.renderFiles", json);
+                System.Diagnostics.Debug.WriteLine($"✅ Rendered files for {view}");
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ LoadViewInstance error: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
+            
+            // Check if it's a session expired error
+            if (ex.Message.Contains("Session Expired") || ex.Message.Contains("Unauthorized"))
+            {
+                await JS.InvokeVoidAsync("window.handleSessionExpired");
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("window.showViewError", ex.Message);
+            }
+        }
+    }
+
+    [JSInvokable]
+    public static async Task OpenLoginPage()
+    {
+        if (Application.Current?.MainPage != null)
+        {
+            var loginPage = new LoginPage();
+            await Application.Current.MainPage.Navigation.PushModalAsync(loginPage);
+        }
+    }
+
+    [JSInvokable]
+    public static async Task HandleEmailLogin(string email, string password)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var token = await api.LoginWithCredentialsAsync(email, password);
+        if (!string.IsNullOrEmpty(token))
+        {
+            var cookies = await SecureStorage.Default.GetAsync("auth_cookies") ?? "";
+            await Services.AppBridge.SaveTokenAndNotify(token, cookies);
+        }
+        else
+        {
+            await Application.Current.MainPage.Dispatcher.DispatchAsync(async () =>
+            {
+                // Reset UI back to login form
+                if (_instance != null)
+                {
+                    await _instance.JS.InvokeVoidAsync("window.showLoginError", "Invalid email or password");
+                }
+            });
+        }
+    }
+
+    [JSInvokable]
+    public static async Task HandleManualToken(string token)
+    {
+        await Services.AppBridge.SaveTokenAndNotify(token);
+    }
+
+    // Workspace Methods
+    [JSInvokable]
+    public static async Task<string> GetWorkspaces()
+    {
+        try
+        {
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) return "[]";
+
+            var workspaces = await api.GetWorkspacesAsync();
+            
+            // Ensure Default workspace is always present
+            var hasDefault = workspaces.Any(w => w.IsDefault || w.Id == 0);
+            if (!hasDefault)
+            {
+                workspaces.Insert(0, new Workspace { Id = 0, Name = "Default", IsDefault = true });
+            }
+            
+            var jsonOptions = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            };
+            return JsonSerializer.Serialize(workspaces, jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ GetWorkspaces error: {ex.Message}");
+            return "[]";
+        }
+    }
+
+    [JSInvokable]
+    public static async Task<bool> CreateWorkspace(string name)
+    {
+        try
+        {
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) return false;
+
+            var workspace = await api.CreateWorkspaceAsync(name);
+            return workspace != null;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ CreateWorkspace error: {ex.Message}");
+            return false;
+        }
+    }
+
+    [JSInvokable]
+    public static async Task<bool> RenameWorkspace(int workspaceId, string newName)
+    {
+        // Workspace renaming disabled in sync-only mode
+        System.Diagnostics.Debug.WriteLine("🏢 RenameWorkspace called but disabled in sync-only mode");
+        await Application.Current.MainPage.DisplayAlert("Info", "Workspace renaming is disabled in sync mode. Please use the web interface to rename workspaces.", "OK");
+        return false;
+    }
+
+    [JSInvokable]
+    public static async Task<bool> DeleteWorkspace(int workspaceId)
+    {
+        try
+        {
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) return false;
+
+            return await api.DeleteWorkspaceAsync(workspaceId);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ DeleteWorkspace error: {ex.Message}");
+            return false;
+        }
+    }
+
+
+
+
+
+
+
+    // Static LoadView kept for backward compatibility but redirects to instance
+    [JSInvokable]
+    public static async Task LoadView(string view)
+    {
+        System.Diagnostics.Debug.WriteLine($"🔄 Static LoadView called - redirecting to instance");
+        if (_instance != null)
+        {
+            await _instance.LoadViewInstance(view);
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine("❌ No Home instance available!");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task UploadFile(int? parentId = null)
+    {
+        System.Diagnostics.Debug.WriteLine($"🔍 UploadFile called with parentId: {parentId}");
+        
+        // CRITICAL FIX: Get the correct current folder ID from JavaScript
+        if (_instance != null)
+        {
+            try
+            {
+                // Get the actual current folder ID from the UI state
+                var jsCurrentFolderId = await _instance.JS.InvokeAsync<string>("eval", "typeof currentFolderId !== 'undefined' ? String(currentFolderId) : 'null'");
+                var jsCurrentView = await _instance.JS.InvokeAsync<string>("eval", "typeof currentView !== 'undefined' ? currentView : 'all'");
+                
+                System.Diagnostics.Debug.WriteLine($"🔍 JS currentView: {jsCurrentView}");
+                System.Diagnostics.Debug.WriteLine($"🔍 JS currentFolderId: {jsCurrentFolderId}");
+                
+                // If we're in "all" view, use the JavaScript currentFolderId
+                if (jsCurrentView == "all")
+                {
+                    if (string.IsNullOrEmpty(jsCurrentFolderId) || jsCurrentFolderId == "null" || jsCurrentFolderId == "undefined")
+                    {
+                        parentId = null;
+                        System.Diagnostics.Debug.WriteLine($"🏠 JavaScript indicates root level - using parentId: null");
+                    }
+                    else if (int.TryParse(jsCurrentFolderId, out int jsParentId) && jsParentId > 0)
+                    {
+                        parentId = jsParentId;
+                        System.Diagnostics.Debug.WriteLine($"📁 JavaScript indicates folder level - using parentId: {parentId}");
+                    }
+                    else
+                    {
+                        parentId = null;
+                        System.Diagnostics.Debug.WriteLine($"🏠 JavaScript currentFolderId invalid - defaulting to root");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"⚠️ Could not get JavaScript state: {ex.Message}");
+            }
+        }
+        
+        System.Diagnostics.Debug.WriteLine($"🔍 Final parentId for upload: {parentId}");
+        
+        try
+        {
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            var offlineMgr = Application.Current?.Handler?.MauiContext?.Services.GetService<OfflineManager>();
+            var uploadService = Application.Current?.Handler?.MauiContext?.Services.GetService<UploadService>();
+            if (api == null || offlineMgr == null) return;
+
+            var results = await FilePicker.PickMultipleAsync(new PickOptions { PickerTitle = "Select files to upload" });
+            if (results != null && results.Any())
+            {
+                var filesList = results.ToList();
+                System.Diagnostics.Debug.WriteLine($"📤 Selected {filesList.Count} files for upload");
+                
+                // Check if offline
+                if (offlineMgr.IsOffline)
+                {
+                    foreach (var file in filesList)
+                    {
+                        await offlineMgr.QueueOperationAsync(new OfflineOperation
+                        {
+                            Type = OperationType.Upload,
+                            FilePath = file.FullPath,
+                            FileName = file.FileName,
+                            Timestamp = DateTime.UtcNow
+                        });
+                    }
+                    
+                    await Application.Current.MainPage.DisplayAlert(
+                        "Queued for Upload", 
+                        $"{filesList.Count} file(s) will be uploaded when you're back online.", 
+                        "OK"
+                    );
+                    return;
+                }
+                
+                // Check for files that are too large
+                const long absoluteMaxSize = 2L * 1024 * 1024 * 1024; // 2 GB
+                var tooLargeFiles = filesList.Where(f => new FileInfo(f.FullPath).Length > absoluteMaxSize).ToList();
+                
+                if (tooLargeFiles.Any())
+                {
+                    await Application.Current.MainPage.DisplayAlert(
+                        "Files Too Large",
+                        $"{tooLargeFiles.Count} file(s) exceed 2 GB limit and will be skipped.\n\n" +
+                        "Please use the web interface for files over 2 GB.",
+                        "OK"
+                    );
+                    filesList = filesList.Except(tooLargeFiles).ToList();
+                    if (!filesList.Any()) return;
+                }
+                
+                // Show confirmation for multiple files
+                if (filesList.Count > 1)
+                {
+                    var totalSize = filesList.Sum(f => new FileInfo(f.FullPath).Length) / 1024.0 / 1024.0;
+                    var proceed = await Application.Current.MainPage.DisplayAlert(
+                        "Upload Multiple Files",
+                        $"Upload {filesList.Count} files ({totalSize:F1} MB total)?\n\n" +
+                        "Files will be uploaded one at a time.",
+                        "Upload",
+                        "Cancel"
+                    );
+                    
+                    if (!proceed) return;
+                }
+                
+                // Show batch upload progress window
+                var batchProgressPage = new BatchUploadProgressPage();
+                await Application.Current.MainPage.Navigation.PushModalAsync(batchProgressPage);
+                
+                // Upload files one by one
+                int successCount = 0;
+                int failCount = 0;
+                int currentIndex = 0;
+                
+                foreach (var file in filesList)
+                {
+                    if (batchProgressPage.IsCancelled)
+                    {
+                        System.Diagnostics.Debug.WriteLine("⚠️ Upload cancelled by user");
+                        break;
+                    }
+                    
+                    try
+                    {
+                        currentIndex++;
+                        batchProgressPage.UpdateProgress(currentIndex, filesList.Count, file.FileName);
+                        
+                        var fileInfo = new FileInfo(file.FullPath);
+                        var fileSizeMB = fileInfo.Length / 1024.0 / 1024.0;
+                        
+                        System.Diagnostics.Debug.WriteLine($"📤 Uploading {file.FileName} ({fileSizeMB:F1} MB)...");
+                        
+                        // Upload file with correct parent ID
+                        System.Diagnostics.Debug.WriteLine($"📤 Uploading {file.FileName} to parentId: {parentId}");
+                        var uploadedFile = await api.UploadFileAsync(file.FullPath, parentId);
+                        if (uploadedFile != null)
+                        {
+                            successCount++;
+                            System.Diagnostics.Debug.WriteLine($"✅ Uploaded {file.FileName}");
+                        }
+                        else
+                        {
+                            failCount++;
+                            System.Diagnostics.Debug.WriteLine($"❌ Failed to upload {file.FileName}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failCount++;
+                        System.Diagnostics.Debug.WriteLine($"❌ Error uploading {file.FileName}: {ex.Message}");
+                    }
+                }
+                
+                // Show summary in progress window
+                batchProgressPage.ShowSuccess(successCount, failCount);
+                await RefreshFiles();
+                
+                // Wait 2 seconds before allowing close
+                await Task.Delay(2000);
+                batchProgressPage.Complete();
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ Upload error: {ex.Message}");
+            await Application.Current.MainPage.DisplayAlert("Error", $"Upload failed: {ex.Message}", "OK");
+        }
+    }
+
+
+
+    [JSInvokable]
+    public static async Task CreateFolder(string name, int? parentId)
+    {
+        // Folder creation disabled in sync-only mode
+        System.Diagnostics.Debug.WriteLine("📁 CreateFolder called but disabled in sync-only mode");
+        await Application.Current.MainPage.DisplayAlert("Info", "Folder creation is disabled in sync mode. Folders are managed through the workspace system.", "OK");
+    }
+
+    [JSInvokable]
+    public static async Task RenameFile(int fileId, string newName)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var success = await api.RenameFileAsync(fileId, newName);
+        if (success)
+        {
+            await RefreshFiles();
+            
+            // Trigger sync to update local folder
+            var syncService = Application.Current?.Handler?.MauiContext?.Services.GetService<SyncService>();
+            if (syncService != null)
+            {
+                System.Diagnostics.Debug.WriteLine("🔄 Triggering sync after file rename...");
+                _ = Task.Run(async () => await syncService.TriggerManualSyncAsync());
+            }
+        }
+        else
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", "Failed to rename.", "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task DeleteFile(int fileId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var success = await api.DeleteFileAsync(fileId);
+        if (success)
+        {
+            await RefreshFiles();
+            
+            // Trigger CLEANUP sync (no upload) to remove deleted file from local folder
+            var syncService = Application.Current?.Handler?.MauiContext?.Services.GetService<SyncService>();
+            if (syncService != null)
+            {
+                System.Diagnostics.Debug.WriteLine("🧹 Triggering cleanup sync after file deletion...");
+                _ = Task.Run(async () => await syncService.TriggerCleanupSyncAsync());
+            }
+        }
+    }
+
+    [JSInvokable]
+    public static async Task ToggleStar(int fileId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        System.Diagnostics.Debug.WriteLine($"⭐ Toggling star for file: {fileId}");
+        
+        // Get the current view from JavaScript to determine action
+        if (_instance != null)
+        {
+            var currentView = await _instance.JS.InvokeAsync<string>("eval", "currentView");
+            System.Diagnostics.Debug.WriteLine($"📍 Current view: {currentView}");
+            
+            if (currentView == "starred")
+            {
+                // In starred view, always unstar
+                System.Diagnostics.Debug.WriteLine($"⭐ In starred view, unstarring file...");
+                var success = await api.UnstarFileAsync(fileId);
+                System.Diagnostics.Debug.WriteLine(success ? "✅ File unstarred" : "❌ Unstar failed");
+            }
+            else
+            {
+                // In other views, check if file is starred and toggle
+                var offlineMgr = Application.Current?.Handler?.MauiContext?.Services.GetService<OfflineManager>();
+                var files = await offlineMgr.GetFilesAsync();
+                var file = files.FirstOrDefault(f => f.Id == fileId);
+                
+                if (file != null && file.IsStarred)
+                {
+                    System.Diagnostics.Debug.WriteLine($"⭐ File is starred, unstarring...");
+                    await api.UnstarFileAsync(fileId);
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"⭐ File is not starred, starring...");
+                    await api.StarFileAsync(fileId);
+                }
+            }
+        }
+        
+        await RefreshFiles();
+    }
+
+    [JSInvokable]
+    public static async Task RestoreFile(int fileId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        await api.RestoreFileAsync(fileId);
+        await RefreshFiles();
+        
+        // Trigger sync to update local folder
+        var syncService = Application.Current?.Handler?.MauiContext?.Services.GetService<SyncService>();
+        if (syncService != null)
+        {
+            System.Diagnostics.Debug.WriteLine("🔄 Triggering sync after file restore...");
+            _ = Task.Run(async () => await syncService.TriggerManualSyncAsync());
+        }
+    }
+
+    [JSInvokable]
+    public static async Task DeletePermanently(int fileId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        // No confirmation here - already confirmed in JavaScript
+        var success = await api.DeleteFilePermanentlyAsync(fileId);
+        if (success)
+        {
+            await RefreshFiles();
+            
+            // Trigger cleanup sync to remove from local folder
+            var syncService = Application.Current?.Handler?.MauiContext?.Services.GetService<SyncService>();
+            if (syncService != null)
+            {
+                System.Diagnostics.Debug.WriteLine("🧹 Triggering cleanup sync after permanent deletion...");
+                _ = Task.Run(async () => await syncService.TriggerCleanupSyncAsync());
+            }
+        }
+    }
+
+    [JSInvokable]
+    public static async Task EmptyTrash()
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        System.Diagnostics.Debug.WriteLine("🗑️ Emptying trash to free up storage space...");
+        
+        var success = await api.EmptyTrashAsync();
+        if (success)
+        {
+            System.Diagnostics.Debug.WriteLine("✅ Trash emptied successfully - storage space freed");
+            await RefreshFiles();
+            
+            // Show notification using instance JS
+            if (_instance != null)
+            {
+                await _instance.JS.InvokeVoidAsync("showNotification", "Trash emptied successfully. Storage space has been freed.", "success");
+            }
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine("❌ Failed to empty trash");
+            if (_instance != null)
+            {
+                await _instance.JS.InvokeVoidAsync("showNotification", "Failed to empty trash. Please try again.", "error");
+            }
+        }
+    }
+
+    [JSInvokable]
+    public static async Task DownloadFile(int fileId)
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"🔽 Manual download requested for file ID: {fileId}");
+            
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) 
+            {
+                System.Diagnostics.Debug.WriteLine("❌ ApiService not available");
+                return;
+            }
+
+            // Get file info first
+            var files = await api.GetFilesAsync();
+            var file = files.FirstOrDefault(f => f.Id == fileId);
+            if (file == null) 
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ File with ID {fileId} not found");
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"📄 Found file: {file.Name} (Size: {file.FileSize} bytes)");
+
+            // Use Downloads folder for manual downloads (not sync folder)
+            var downloadsFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            System.Diagnostics.Debug.WriteLine($"📁 Download destination: {downloadsFolder}");
+            
+            var path = await api.DownloadFileAsync(file, downloadsFolder);
+            
+            if (path != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"✅ Manual download successful: {path}");
+                await Application.Current.MainPage.DisplayAlert("Downloaded", $"File saved to Downloads folder:\n{Path.GetFileName(path)}", "OK");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("❌ Manual download failed");
+                await Application.Current.MainPage.DisplayAlert("Error", "Download failed. Please try again.", "OK");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ Manual download error: {ex.Message}");
+            await Application.Current.MainPage.DisplayAlert("Error", $"Download failed: {ex.Message}", "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task Logout()
+    {
+        System.Diagnostics.Debug.WriteLine("🚪 Logout requested");
+        
+        // Use AppBridge to clear credentials and notify
+        await Services.AppBridge.LogoutAsync();
+        
+        // Reload the page to show login screen
+        if (_instance != null)
+        {
+            await _instance.InvokeAsync(async () =>
+            {
+                await _instance.JS.InvokeVoidAsync("location.reload");
+            });
+        }
+    }
+
+    [JSInvokable]
+    public static async Task<bool> SwitchWorkspace(int workspaceId)
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"🔄 Switching to workspace: {workspaceId}");
+            
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) return false;
+            
+            // Switch workspace on the server (this updates ApiService.CurrentWorkspaceId)
+            var success = await api.SwitchWorkspaceAsync(workspaceId);
+            
+            if (success)
+            {
+                System.Diagnostics.Debug.WriteLine($"✅ Successfully switched to workspace {workspaceId}");
+                System.Diagnostics.Debug.WriteLine($"🏢 Current workspace ID is now: {ApiService.CurrentWorkspaceId}");
+                
+                // WORKSPACE PERSISTENCE FIX: Save the new workspace immediately
+                await SecureStorage.Default.SetAsync("last_active_workspace_id", workspaceId.ToString());
+                System.Diagnostics.Debug.WriteLine($"💾 Saved workspace {workspaceId} to persistent storage");
+                
+                // Update sync service to use new workspace FIRST (before UI updates)
+                var syncService = Application.Current?.Handler?.MauiContext?.Services.GetService<SyncService>();
+                var fileWatcher = Application.Current?.Handler?.MauiContext?.Services.GetService<FileWatcherService>();
+                
+                if (syncService != null)
+                {
+                    System.Diagnostics.Debug.WriteLine("🔄 Switching sync service to new workspace...");
+                    await syncService.SwitchWorkspaceAsync(workspaceId);
+                    
+                    // Switch FileWatcher to new workspace folder
+                    if (fileWatcher != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine("🔄 Switching FileWatcher to new workspace...");
+                        await fileWatcher.SwitchWorkspaceAsync();
+                    }
+                    
+                    // Check if sync is configured for this workspace
+                    var isSyncConfigured = await syncService.IsSyncConfiguredAsync();
+                    System.Diagnostics.Debug.WriteLine($"� Siync configured for workspace {workspaceId}: {isSyncConfigured}");
+                    
+                    if (isSyncConfigured)
+                    {
+                        System.Diagnostics.Debug.WriteLine("🔄 Triggering sync for new workspace...");
+                        _ = Task.Run(async () => await syncService.TriggerManualSyncAsync());
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("⚠️ Sync not configured for this workspace - workspace folder will be created when sync is set up");
+                    }
+                }
+                
+                // Update current workspace in UI
+                if (_instance != null)
+                {
+                    await _instance.InvokeAsync(async () =>
+                    {
+                        await _instance.JS.InvokeVoidAsync("window.updateCurrentWorkspace", workspaceId);
+                    });
+                }
+                
+                // Refresh files to show the new workspace content (now with correct workspace ID)
+                await RefreshFiles();
+                
+                return true;
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ Failed to switch to workspace {workspaceId}");
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ Error switching workspace: {ex.Message}");
+            return false;
+        }
+    }
+
+    [JSInvokable]
+    public static async Task RefreshFiles()
+    {
+        if (_instance != null)
+        {
+            await _instance.RefreshFilesInstance();
+        }
+    }
+
+    public async Task RefreshFilesInstance()
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                var currentView = await JS.InvokeAsync<string>("eval", "currentView");
+                var currentFolderId = await JS.InvokeAsync<string>("eval", "currentFolderId");
+                
+                System.Diagnostics.Debug.WriteLine($"🔄 RefreshFiles: view={currentView}, folderId={currentFolderId}");
+                
+                // If we're in "all" view and inside a folder, refresh the folder contents instead of switching view
+                if (currentView == "all" && !string.IsNullOrEmpty(currentFolderId) && currentFolderId != "null")
+                {
+                    if (int.TryParse(currentFolderId, out int folderId) && folderId > 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"🔄 Refreshing folder contents for folder {folderId}");
+                        // WORKSPACE FIX: Use the correct method to refresh folder contents
+                        var folderContents = await LoadFolderContents(folderId);
+                        await JS.InvokeVoidAsync("window.renderFiles", folderContents);
+                        return;
+                    }
+                }
+                
+                // Otherwise, refresh the current view (this will reset to root for "all" view)
+                await JS.InvokeVoidAsync("window.switchView", currentView);
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ Refresh error: {ex.Message}");
+        }
+    }
+
+    [JSInvokable]
+    public async Task<string> LoadFolderContents(int? folderId)
+    {
+        try
+        {
+            var files = await OfflineMgr.GetFilesAsync(folderId);
+            
+            // Update breadcrumbs
+            if (folderId.HasValue)
+            {
+                var folder = files.FirstOrDefault(f => f.Id == folderId.Value);
+                if (folder != null)
+                {
+                    var crumbs = new List<BreadcrumbItem>
+                    {
+                        new BreadcrumbItem { FolderId = null, Name = "Home" },
+                        new BreadcrumbItem { FolderId = folderId, Name = folder.Name }
+                    };
+                    await JS.InvokeVoidAsync("window.setBreadcrumbs", JsonSerializer.Serialize(crumbs, JsonOptions));
+                }
+            }
+            else
+            {
+                var crumbs = new List<BreadcrumbItem>
+                {
+                    new BreadcrumbItem { FolderId = null, Name = "Home" }
+                };
+                await JS.InvokeVoidAsync("window.setBreadcrumbs", JsonSerializer.Serialize(crumbs, JsonOptions));
+            }
+            
+            return JsonSerializer.Serialize(files, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ LoadFolderContents error: {ex.Message}");
+            return "[]";
+        }
+    }
+
+    [JSInvokable]
+    public static async Task CopyFile(int fileId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var copy = await api.CopyFileAsync(fileId);
+        if (copy != null)
+        {
+            await Application.Current.MainPage.DisplayAlert("Success", $"'{copy.Name}' created!", "OK");
+            await RefreshFiles();
+        }
+        else
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", "Failed to copy file.", "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task PreviewFile(int fileId)
+    {
+        try
+        {
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) return;
+
+            var files = await api.GetFilesAsync();
+            var file = files.FirstOrDefault(f => f.Id == fileId);
+            if (file == null) return;
+
+            // Check file size - preview only works for files < 50 MB
+            const long maxPreviewSize = 50 * 1024 * 1024; // 50 MB
+            if (file.FileSize > maxPreviewSize)
+            {
+                var fileSizeMB = file.FileSize / 1024.0 / 1024.0;
+                var download = await Application.Current.MainPage.DisplayAlert(
+                    "File Too Large for Preview",
+                    $"'{file.Name}' is {fileSizeMB:F0} MB.\n\n" +
+                    "Preview only works for files under 50 MB.\n\n" +
+                    "Would you like to download it instead?",
+                    "Download",
+                    "Cancel"
+                );
+                
+                if (download)
+                {
+                    await DownloadFile(fileId);
+                }
+                return;
+            }
+
+            // Check if file is previewable
+            var previewableTypes = new[] { "image", "pdf", "text", "video", "audio" };
+            var previewableMimes = new[] { "application/pdf", "application/json", "application/xml" };
+            
+            if (!previewableTypes.Contains(file.Type) && !previewableMimes.Any(m => file.Mime?.Contains(m) == true))
+            {
+                await Application.Current.MainPage.DisplayAlert("Preview", "Preview not available for this file type.", "OK");
+                return;
+            }
+
+            var content = await api.GetFilePreviewAsync(fileId, file.Hash);
+            if (content != null)
+            {
+                var base64 = Convert.ToBase64String(content);
+                await _instance.JS.InvokeVoidAsync("window.showPreview", fileId, file.Name, base64, file.Mime ?? "application/octet-stream");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ PreviewFile error: {ex.Message}");
+            
+            // Provide helpful error message
+            var errorMsg = "Failed to load preview.";
+            if (ex.Message.Contains("too large"))
+            {
+                errorMsg = "File is too large for preview. Try downloading it instead.";
+            }
+            
+            await Application.Current.MainPage.DisplayAlert("Preview Error", errorMsg, "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task MoveFiles(int[] fileIds, int? destinationId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var success = await api.MoveFilesAsync(fileIds, destinationId);
+        if (success)
+        {
+            await Application.Current.MainPage.DisplayAlert("Success", $"{fileIds.Length} item(s) moved!", "OK");
+            await RefreshFiles();
+            
+            // Trigger sync to update local folder
+            var syncService = Application.Current?.Handler?.MauiContext?.Services.GetService<SyncService>();
+            if (syncService != null)
+            {
+                System.Diagnostics.Debug.WriteLine("🔄 Triggering sync after moving files...");
+                _ = Task.Run(async () => await syncService.TriggerManualSyncAsync());
+            }
+        }
+        else
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", "Failed to move files.", "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task<string> GetFoldersForMove(int? parentId)
+    {
+        try
+        {
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) return "[]";
+
+            var files = parentId.HasValue 
+                ? await api.GetFolderContentsAsync(parentId.Value)
+                : await api.GetFilesAsync();
+            
+            var folders = files.Where(f => f.Type == "folder").ToList();
+            return JsonSerializer.Serialize(folders);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ GetFoldersForMove error: {ex.Message}");
+            return "[]";
+        }
+    }
+
+    [JSInvokable]
+    public static async Task<string> GetFileShares(int fileId)
+    {
+        try
+        {
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) return "[]";
+
+            var shares = await api.GetFileSharesAsync(fileId);
+            return JsonSerializer.Serialize(shares);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ GetFileShares error: {ex.Message}");
+            return "[]";
+        }
+    }
+
+    [JSInvokable]
+    public static async Task ShareWithUser(int fileId, string email, string permission)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var permissions = new Dictionary<string, bool>
+        {
+            ["view"] = true,
+            ["edit"] = permission == "edit",
+            ["download"] = true
+        };
+
+        var success = await api.ShareFileWithUserAsync(fileId, email, permissions);
+        if (success)
+        {
+            await Application.Current.MainPage.DisplayAlert("Success", $"Shared with {email}", "OK");
+        }
+        else
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", "Failed to share file.", "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task RemoveUserShare(int fileId, int userId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var success = await api.RemoveShareAsync(fileId, userId);
+        if (!success)
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", "Failed to remove user.", "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task<string?> GetShareableLink(int fileId)
+    {
+        try
+        {
+            var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+            if (api == null) return null;
+
+            var link = await api.GetShareableLinkAsync(fileId);
+            return link?.Url;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ GetShareableLink error: {ex.Message}");
+            return null;
+        }
+    }
+
+    [JSInvokable]
+    public static async Task GenerateShareableLink(int fileId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var link = await api.CreateShareableLinkAsync(fileId, allowDownload: true, allowEdit: false);
+        if (link == null)
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", "Failed to generate link.", "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task DeleteShareableLink(int fileId)
+    {
+        var api = Application.Current?.Handler?.MauiContext?.Services.GetService<ApiService>();
+        if (api == null) return;
+
+        var success = await api.DeleteShareableLinkAsync(fileId);
+        if (!success)
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", "Failed to delete link.", "OK");
+        }
+    }
+
+    [JSInvokable]
+    public static async Task OpenSyncSettings()
+    {
+        await Application.Current.MainPage.Navigation.PushModalAsync(new SyncSetupPage());
+    }
+
+    [JSInvokable]
+    public static async Task DiagnoseSyncIssue()
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine("🔍 === SYNC DIAGNOSTIC REPORT ===");
+            
+            var syncService = Application.Current?.Handler?.MauiContext?.Services.GetService<SyncService>();
+            var fileWatcher = Application.Current?.Handler?.MauiContext?.Services.GetService<FileWatcherService>();
+            
+            if (syncService != null)
+            {
+                var syncPath = await syncService.GetSyncFolderPathAsync();
+                var isConfigured = await syncService.IsSyncConfiguredAsync();
+                var syncStatus = await syncService.GetSyncStatusAsync();
+                
+                System.Diagnostics.Debug.WriteLine($"📁 Sync Path: '{syncPath}'");
+                System.Diagnostics.Debug.WriteLine($"✅ Is Configured: {isConfigured}");
+                System.Diagnostics.Debug.WriteLine($"🔄 Is Syncing: {syncStatus.IsSyncing}");
+                System.Diagnostics.Debug.WriteLine($"📊 Local Files: {syncStatus.LocalFileCount}");
+                
+                if (!string.IsNullOrEmpty(syncPath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"📂 Directory Exists: {Directory.Exists(syncPath)}");
+                    if (Directory.Exists(syncPath))
+                    {
+                        var files = Directory.GetFiles(syncPath, "*", SearchOption.AllDirectories);
+                        System.Diagnostics.Debug.WriteLine($"📄 Total Files in Sync Folder: {files.Length}");
+                    }
+                }
+            }
+            
+            if (fileWatcher != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"👁️ FileWatcher IsWatching: {fileWatcher.IsWatching}");
+                System.Diagnostics.Debug.WriteLine($"📁 FileWatcher Path: '{fileWatcher.GetWatchedPath()}'");
+            }
+            
+            System.Diagnostics.Debug.WriteLine("🔍 === END DIAGNOSTIC REPORT ===");
+            
+            await Application.Current.MainPage.DisplayAlert("Diagnostic", "Check debug output for sync diagnostic report", "OK");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ Diagnostic error: {ex.Message}");
+        }
+    }
+
+
+
+
+
+
+
+    private async Task RestoreLastActiveWorkspace()
+    {
+        try
+        {
+            // Get the last active workspace ID from storage
+            var lastWorkspaceIdStr = await SecureStorage.Default.GetAsync("last_active_workspace_id");
+            if (!string.IsNullOrEmpty(lastWorkspaceIdStr) && int.TryParse(lastWorkspaceIdStr, out int lastWorkspaceId))
+            {
+                System.Diagnostics.Debug.WriteLine($"🔄 Restoring last active workspace: {lastWorkspaceId}");
+                
+                // Switch to the last active workspace (this will update ApiService.CurrentWorkspaceId)
+                var success = await Api.SwitchWorkspaceAsync(lastWorkspaceId);
+                if (success)
+                {
+                    System.Diagnostics.Debug.WriteLine($"✅ Successfully restored workspace {lastWorkspaceId}");
+                    
+                    // Update sync service to use restored workspace
+                    await SyncService.SwitchWorkspaceAsync(lastWorkspaceId);
+                    
+                    // Update FileWatcher to use restored workspace
+                    await FileWatcher.SwitchWorkspaceAsync();
+                    
+                    // Get workspace details to update UI properly
+                    var workspaces = await Api.GetWorkspacesAsync();
+                    var restoredWorkspace = workspaces.FirstOrDefault(w => w.Id == lastWorkspaceId);
+                    
+                    if (restoredWorkspace != null)
+                    {
+                        // Update UI with full workspace information
+                        await JS.InvokeVoidAsync("window.setCurrentWorkspace", 
+                            restoredWorkspace.Id, 
+                            restoredWorkspace.Name, 
+                            restoredWorkspace.IsDefault ? "Personal workspace" : "Team workspace");
+                        System.Diagnostics.Debug.WriteLine($"🎨 Updated UI for restored workspace: {restoredWorkspace.Name}");
+                    }
+                    else
+                    {
+                        // Fallback to just updating the ID
+                        await JS.InvokeVoidAsync("window.updateCurrentWorkspace", lastWorkspaceId);
+                        System.Diagnostics.Debug.WriteLine($"🎨 Updated UI with workspace ID: {lastWorkspaceId}");
+                    }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"⚠️ Failed to restore workspace {lastWorkspaceId}, staying in default");
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("ℹ️ No last active workspace found, using default");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ Error restoring workspace: {ex.Message}");
+        }
+    }
+
+    private async Task InitializeFileWatcherIfNeeded()
+    {
+        try
+        {
+            // Check if sync is configured
+            var isSyncConfigured = await SyncService.IsSyncConfiguredAsync();
+            var syncPath = await SyncService.GetSyncFolderPathAsync();
+            
+            System.Diagnostics.Debug.WriteLine($"🔍 Sync configured: {isSyncConfigured}");
+            System.Diagnostics.Debug.WriteLine($"📁 Sync path: {syncPath}");
+            
+            if (isSyncConfigured && !string.IsNullOrEmpty(syncPath))
+            {
+                System.Diagnostics.Debug.WriteLine("✅ Sync is configured - starting FileWatcher...");
+                
+                // Ensure LocalDatabaseService is set on SyncService
+                var localDb = Application.Current?.Handler?.MauiContext?.Services.GetService<LocalDatabaseService>();
+                if (localDb != null)
+                {
+                    SyncService.SetLocalDatabase(localDb);
+                    System.Diagnostics.Debug.WriteLine("🗄️ LocalDatabase connected to SyncService");
+                }
+                
+                // Start FileWatcher to monitor local changes
+                await FileWatcher.StartWatchingAsync();
+                
+                System.Diagnostics.Debug.WriteLine($"👁️ FileWatcher status: IsWatching={FileWatcher.IsWatching}");
+                System.Diagnostics.Debug.WriteLine($"📁 Watched path: {FileWatcher.GetWatchedPath()}");
+                
+                // CRITICAL: Force initial scan for existing files
+                System.Diagnostics.Debug.WriteLine("🔍 FORCE: Starting initial scan for existing files...");
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(1000); // Wait 1 second for FileWatcher to settle
+                    await FileWatcher.ForceInitialScanAsync();
+                });
+                
+                // Test FileWatcher functionality
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(2000); // Wait 2 seconds before testing
+                    var testResult = await FileWatcher.TestFileWatcherAsync();
+                    System.Diagnostics.Debug.WriteLine($"🧪 FileWatcher test result: {testResult}");
+                });
+                
+                // Optional: Trigger a background sync to ensure everything is up to date
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        System.Diagnostics.Debug.WriteLine("🔄 Triggering background sync on startup...");
+                        await SyncService.TriggerManualSyncAsync();
+                    }
+                    catch (Exception syncEx)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"⚠️ Background sync failed: {syncEx.Message}");
+                    }
+                });
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("⚠️ Sync not configured - FileWatcher not started");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ Error initializing FileWatcher: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+}
+
+<script>
+    // Global state variables
+    let currentView = 'all';
+    let currentFolderId = null;
+    let breadcrumbs = [{ folderId: null, name: 'Home' }];
+    let blazorInstance = null;
+
+    // Register Blazor instance for callbacks
+    window.registerBlazorInstance = (instance) => {
+        blazorInstance = instance;
+        console.log('✅ Blazor instance registered');
+    };
+
+    // Upload function
+    window.uploadFile = async () => {
+        const parentId = (currentFolderId && currentFolderId > 0) ? currentFolderId : null;
+        console.log(`📤 Uploading files to folder: ${parentId}`);
+        console.log(`🔍 Current context: view=${currentView}, folderId=${currentFolderId}`);
+        console.log(`🔍 Current breadcrumbs:`, breadcrumbs);
+        
+        await DotNet.invokeMethodAsync('OkCloud.Client', 'UploadFile', parentId);
+    };
+
+    // Navigation functions
+    window.switchView = async (view) => {
+        console.log(`🔄 Switching to view: ${view}`);
+        currentView = view;
+        
+        // Reset folder context when switching views
+        if (view !== 'all') {
+            currentFolderId = null;
+            breadcrumbs = [{ folderId: null, name: 'Home' }];
+            console.log(`🏠 Reset to root for view: ${view}`);
+        }
+        
+        // Update UI
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        document.querySelector(`[data-view="${view}"]`)?.classList.add('active');
+        
+        // Load view data
+        if (blazorInstance) {
+            await blazorInstance.invokeMethodAsync('LoadViewInstance', view);
+        }
+    };
+
+    // Navigate to folder
+    window.navigateToFolder = async (folderId) => {
+        console.log(`🔍 Navigating to folder: ${folderId}`);
+        
+        // Update current folder ID
+        currentFolderId = (folderId && folderId > 0) ? folderId : null;
+        
+        console.log(`📁 Set currentFolderId to: ${currentFolderId}`);
+        
+        // Load folder contents
+        if (blazorInstance) {
+            await blazorInstance.invokeMethodAsync('LoadFolderContents', folderId);
+        }
+    };
+
+    // Navigate back to root
+    window.navigateToRoot = async () => {
+        console.log(`🏠 Navigating back to root`);
+        currentFolderId = null;
+        breadcrumbs = [{ folderId: null, name: 'Home' }];
+        
+        await window.switchView('all');
+    };
+
+    // Set breadcrumbs (called from C#)
+    window.setBreadcrumbs = (breadcrumbsJson) => {
+        try {
+            breadcrumbs = JSON.parse(breadcrumbsJson);
+            console.log(`🍞 Breadcrumbs updated:`, breadcrumbs);
+            
+            // Update currentFolderId based on breadcrumbs
+            if (breadcrumbs && breadcrumbs.length > 0) {
+                const lastCrumb = breadcrumbs[breadcrumbs.length - 1];
+                currentFolderId = lastCrumb.folderId;
+                console.log(`📁 Updated currentFolderId from breadcrumbs: ${currentFolderId}`);
+            }
+        } catch (ex) {
+            console.error('❌ Error parsing breadcrumbs:', ex);
+        }
+    };
+
+    // Create folder
+    window.createFolder = async () => {
+        const name = prompt('Enter folder name:');
+        if (name && name.trim()) {
+            console.log(`📁 Creating folder: ${name} in parent: ${currentFolderId}`);
+            await DotNet.invokeMethodAsync('OkCloud.Client', 'CreateFolder', name.trim(), currentFolderId);
+        }
+    };
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('🚀 JavaScript initialized');
+        console.log(`📍 Initial state: view=${currentView}, folderId=${currentFolderId}`);
+    });
+</script>

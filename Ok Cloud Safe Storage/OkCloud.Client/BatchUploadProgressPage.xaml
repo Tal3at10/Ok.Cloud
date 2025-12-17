@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="OkCloud.Client.BatchUploadProgressPage"
+             Title="Uploading Files"
+             BackgroundColor="Transparent">
+    
+    <Grid HorizontalOptions="Center" 
+          VerticalOptions="Center"
+          WidthRequest="400"
+          HeightRequest="280">
+        
+        <Border Padding="25" 
+                BackgroundColor="#1a1a1a"
+                StrokeThickness="1"
+                Stroke="#2a2a2a">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="12"/>
+            </Border.StrokeShape>
+            
+            <Border.Shadow>
+                <Shadow Brush="Black"
+                        Offset="0,4"
+                        Radius="20"
+                        Opacity="0.5"/>
+            </Border.Shadow>
+        
+            <VerticalStackLayout Spacing="15">
+                <!-- Header -->
+                <Label Text="Uploading Files"
+                       FontSize="18"
+                       FontAttributes="Bold"
+                       TextColor="White"
+                       HorizontalOptions="Center"/>
+                
+                <!-- Current File -->
+                <Label x:Name="CurrentFileLabel"
+                       Text="Preparing..."
+                       FontSize="12"
+                       TextColor="#9ca3af"
+                       HorizontalOptions="Center"
+                       LineBreakMode="TailTruncation"
+                       MaxLines="1"
+                       WidthRequest="350"/>
+                
+                <!-- Progress Info -->
+                <Label x:Name="ProgressLabel"
+                       Text="0 / 0 files"
+                       FontSize="14"
+                       FontAttributes="Bold"
+                       TextColor="White"
+                       HorizontalOptions="Center"/>
+                
+                <!-- Progress Bar -->
+                <ProgressBar x:Name="ProgressBar"
+                            Progress="0"
+                            ProgressColor="#ff5500"
+                            HeightRequest="6"/>
+                
+                <!-- Percentage -->
+                <Label x:Name="PercentageLabel"
+                       Text="0%"
+                       FontSize="13"
+                       TextColor="#9ca3af"
+                       HorizontalOptions="Center"/>
+                
+                <!-- Status Messages -->
+                <Label x:Name="StatusLabel"
+                       Text=""
+                       FontSize="12"
+                       TextColor="#10b981"
+                       HorizontalOptions="Center"
+                       IsVisible="False"/>
+                
+                <!-- Cancel Button -->
+                <Button x:Name="CancelButton"
+                        Text="Cancel"
+                        BackgroundColor="#2a2a2a"
+                        TextColor="White"
+                        CornerRadius="8"
+                        HeightRequest="36"
+                        Clicked="OnCancelClicked"
+                        Margin="0,5,0,0"/>
+            </VerticalStackLayout>
+        </Border>
+    </Grid>
+</ContentPage>

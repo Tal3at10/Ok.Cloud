@@ -1,0 +1,26 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36401.2
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OkCloud.Client", "OkCloud.Client.csproj", "{134D38BB-F008-499E-84D9-8CBCD9DF8193}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{134D38BB-F008-499E-84D9-8CBCD9DF8193}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{134D38BB-F008-499E-84D9-8CBCD9DF8193}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{134D38BB-F008-499E-84D9-8CBCD9DF8193}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{134D38BB-F008-499E-84D9-8CBCD9DF8193}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{134D38BB-F008-499E-84D9-8CBCD9DF8193}.Release|Any CPU.Build.0 = Release|Any CPU
+		{134D38BB-F008-499E-84D9-8CBCD9DF8193}.Release|Any CPU.Deploy.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {4D0EC13D-C642-419F-8904-A8585E32D0B8}
+	EndGlobalSection
+EndGlobal

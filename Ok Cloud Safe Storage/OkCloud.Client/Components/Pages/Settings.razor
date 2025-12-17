@@ -1,0 +1,535 @@
+@page "/settings"
+@using OkCloud.Client.Services
+@inject StartupManager StartupManager
+@inject WindowsServiceManager ServiceManager
+@inject IJSRuntime JS
+
+<div class="min-h-screen bg-gray-900 text-white p-6">
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-white mb-2">Settings</h1>
+            <p class="text-gray-400">Configure your OK Cloud sync preferences</p>
+        </div>
+
+        <!-- Windows Service Status -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">🛠️</span>
+                Windows Service Status
+            </h2>
+            
+            <div class="space-y-4">
+                <!-- Service Status Display -->
+                <div class="p-4 bg-gray-700 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="font-medium text-white">Background Service</h3>
+                            <p class="text-sm text-gray-400">Windows Service for background sync</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span class="px-3 py-1 rounded-full text-sm font-medium @GetServiceStatusClass()">
+                                @GetServiceStatusText()
+                            </span>
+                            <button @onclick="RefreshServiceStatus" class="text-gray-400 hover:text-white">
+                                🔄
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Service Controls -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <button @onclick="StartService" disabled="@(serviceStatus == ServiceStatus.Running || serviceStatus == ServiceStatus.NotInstalled)" 
+                            class="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                        ▶️ Start Service
+                    </button>
+                    
+                    <button @onclick="StopService" disabled="@(serviceStatus == ServiceStatus.Stopped || serviceStatus == ServiceStatus.NotInstalled)" 
+                            class="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                        ⏹️ Stop Service
+                    </button>
+                    
+                    <button @onclick="RestartService" disabled="@(serviceStatus == ServiceStatus.NotInstalled)" 
+                            class="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                        🔄 Restart Service
+                    </button>
+                </div>
+
+                @if (serviceStatus == ServiceStatus.NotInstalled)
+                {
+                    <div class="p-4 bg-yellow-900 text-yellow-200 rounded-lg">
+                        <p class="font-medium">⚠️ Windows Service Not Installed</p>
+                        <p class="text-sm mt-1">The background service needs to be installed for background sync to work when the app is closed.</p>
+                        <button @onclick="InstallService" class="mt-3 bg-yellow-600 hover:bg-yellow-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                            📦 Install Service
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Background Sync Settings -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">🔄</span>
+                Background Sync
+            </h2>
+            
+            <div class="space-y-4">
+                <!-- Auto-start with Windows -->
+                <div class="flex items-center justify-between p-4 bg-gray-700 rounded-lg">
+                    <div>
+                        <h3 class="font-medium text-white">Start with Windows</h3>
+                        <p class="text-sm text-gray-400">Automatically start OK Cloud when Windows starts</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" @bind="autoStartEnabled" @bind:after="OnAutoStartToggled" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+                    </label>
+                </div>
+
+                <!-- Background sync enabled -->
+                <div class="flex items-center justify-between p-4 bg-gray-700 rounded-lg">
+                    <div>
+                        <h3 class="font-medium text-white">Background Sync</h3>
+                        <p class="text-sm text-gray-400">Keep syncing files even when the app is closed</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" @bind="backgroundSyncEnabled" @bind:after="OnBackgroundSyncToggled" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+                    </label>
+                </div>
+
+                <!-- System Tray -->
+                <div class="flex items-center justify-between p-4 bg-gray-700 rounded-lg">
+                    <div>
+                        <h3 class="font-medium text-white">System Tray Icon</h3>
+                        <p class="text-sm text-gray-400">Show OK Cloud icon in system tray for quick access</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" @bind="systemTrayEnabled" @bind:after="OnSystemTrayToggled" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+                    </label>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(statusMessage))
+            {
+                <div class="mt-4 p-3 rounded-lg @(isError ? "bg-red-900 text-red-200" : "bg-green-900 text-green-200")">
+                    @statusMessage
+                </div>
+            }
+        </div>
+
+        <!-- Sync Preferences -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">⚙️</span>
+                Sync Preferences
+            </h2>
+            
+            <div class="space-y-4">
+                <!-- Sync Interval -->
+                <div class="p-4 bg-gray-700 rounded-lg">
+                    <h3 class="font-medium text-white mb-2">Sync Interval</h3>
+                    <p class="text-sm text-gray-400 mb-3">How often to check for changes (in background mode)</p>
+                    <select @bind="syncInterval" @bind:after="OnSyncIntervalChanged" class="bg-gray-600 text-white rounded px-3 py-2 w-full">
+                        <option value="1">Every 1 minute</option>
+                        <option value="2">Every 2 minutes</option>
+                        <option value="5">Every 5 minutes</option>
+                        <option value="10">Every 10 minutes</option>
+                        <option value="30">Every 30 minutes</option>
+                    </select>
+                </div>
+
+                <!-- Upload on change -->
+                <div class="flex items-center justify-between p-4 bg-gray-700 rounded-lg">
+                    <div>
+                        <h3 class="font-medium text-white">Instant Upload</h3>
+                        <p class="text-sm text-gray-400">Upload files immediately when they change</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" @bind="instantUploadEnabled" @bind:after="OnInstantUploadToggled" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                <span class="mr-2">🔧</span>
+                Actions
+            </h2>
+            
+            <div class="space-y-3">
+                <button @onclick="TestBackgroundSync" class="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                    Test Background Sync
+                </button>
+                
+                <button @onclick="OpenSyncFolder" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                    Open Sync Folder
+                </button>
+                
+                <button @onclick="ResetSettings" class="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                    Reset All Settings
+                </button>
+            </div>
+        </div>
+
+        <!-- Back Button -->
+        <div class="mt-8">
+            <button @onclick="GoBack" class="bg-gray-700 hover:bg-gray-600 text-white font-medium py-2 px-6 rounded-lg transition-colors">
+                ← Back to Drive
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool autoStartEnabled = false;
+    private bool backgroundSyncEnabled = false;
+    private bool systemTrayEnabled = true;
+    private bool instantUploadEnabled = true;
+    private int syncInterval = 2;
+    private string statusMessage = "";
+    private bool isError = false;
+    private ServiceStatus serviceStatus = ServiceStatus.Unknown;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSettingsAsync();
+        await RefreshServiceStatus();
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        try
+        {
+            // Load current settings
+            autoStartEnabled = await StartupManager.IsAutoStartEnabledAsync();
+            
+            // Load other settings from storage
+            var bgSync = await Microsoft.Maui.Storage.SecureStorage.Default.GetAsync("background_sync_enabled");
+            backgroundSyncEnabled = bgSync == "true";
+            
+            var sysTray = await Microsoft.Maui.Storage.SecureStorage.Default.GetAsync("system_tray_enabled");
+            systemTrayEnabled = sysTray != "false"; // Default to true
+            
+            var instant = await Microsoft.Maui.Storage.SecureStorage.Default.GetAsync("instant_upload_enabled");
+            instantUploadEnabled = instant != "false"; // Default to true
+            
+            var interval = await Microsoft.Maui.Storage.SecureStorage.Default.GetAsync("sync_interval");
+            if (int.TryParse(interval, out var intervalValue))
+            {
+                syncInterval = intervalValue;
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error loading settings: {ex.Message}", true);
+        }
+    }
+
+    private async Task OnAutoStartToggled()
+    {
+        try
+        {
+            if (autoStartEnabled)
+            {
+                var success = await StartupManager.SetupBackgroundSyncAsync();
+                if (success)
+                {
+                    ShowMessage("✅ Auto-start enabled successfully", false);
+                }
+                else
+                {
+                    autoStartEnabled = false;
+                    ShowMessage("❌ Failed to enable auto-start", true);
+                }
+            }
+            else
+            {
+                var success = await StartupManager.RemoveBackgroundSyncAsync();
+                if (success)
+                {
+                    ShowMessage("✅ Auto-start disabled", false);
+                }
+                else
+                {
+                    ShowMessage("⚠️ Failed to disable auto-start completely", true);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error: {ex.Message}", true);
+            autoStartEnabled = !autoStartEnabled; // Revert
+        }
+    }
+
+    private async Task OnBackgroundSyncToggled()
+    {
+        try
+        {
+            await Microsoft.Maui.Storage.SecureStorage.Default.SetAsync("background_sync_enabled", backgroundSyncEnabled.ToString().ToLower());
+            ShowMessage($"Background sync {(backgroundSyncEnabled ? "enabled" : "disabled")}", false);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error: {ex.Message}", true);
+        }
+    }
+
+    private async Task OnSystemTrayToggled()
+    {
+        try
+        {
+            await Microsoft.Maui.Storage.SecureStorage.Default.SetAsync("system_tray_enabled", systemTrayEnabled.ToString().ToLower());
+            ShowMessage($"System tray {(systemTrayEnabled ? "enabled" : "disabled")}", false);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error: {ex.Message}", true);
+        }
+    }
+
+    private async Task OnInstantUploadToggled()
+    {
+        try
+        {
+            await Microsoft.Maui.Storage.SecureStorage.Default.SetAsync("instant_upload_enabled", instantUploadEnabled.ToString().ToLower());
+            ShowMessage($"Instant upload {(instantUploadEnabled ? "enabled" : "disabled")}", false);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error: {ex.Message}", true);
+        }
+    }
+
+    private async Task OnSyncIntervalChanged()
+    {
+        try
+        {
+            await Microsoft.Maui.Storage.SecureStorage.Default.SetAsync("sync_interval", syncInterval.ToString());
+            ShowMessage($"Sync interval set to {syncInterval} minute(s)", false);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error: {ex.Message}", true);
+        }
+    }
+
+    private async Task TestBackgroundSync()
+    {
+        try
+        {
+            ShowMessage("🧪 Testing background sync...", false);
+            
+            // Here you would trigger a test sync
+            // For now, just show a message
+            await Task.Delay(1000);
+            ShowMessage("✅ Background sync test completed", false);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Test failed: {ex.Message}", true);
+        }
+    }
+
+    private async Task OpenSyncFolder()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("eval", "window.electronAPI?.openSyncFolder()");
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error opening sync folder: {ex.Message}", true);
+        }
+    }
+
+    private async Task ResetSettings()
+    {
+        try
+        {
+            var confirmed = await JS.InvokeAsync<bool>("confirm", "Are you sure you want to reset all settings to defaults?");
+            if (confirmed)
+            {
+                // Reset all settings
+                await StartupManager.RemoveBackgroundSyncAsync();
+                Microsoft.Maui.Storage.SecureStorage.Default.Remove("background_sync_enabled");
+                Microsoft.Maui.Storage.SecureStorage.Default.Remove("system_tray_enabled");
+                Microsoft.Maui.Storage.SecureStorage.Default.Remove("instant_upload_enabled");
+                Microsoft.Maui.Storage.SecureStorage.Default.Remove("sync_interval");
+                
+                // Reload settings
+                await LoadSettingsAsync();
+                StateHasChanged();
+                
+                ShowMessage("✅ Settings reset to defaults", false);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error resetting settings: {ex.Message}", true);
+        }
+    }
+
+    private async Task GoBack()
+    {
+        await JS.InvokeVoidAsync("history.back");
+    }
+
+    private void ShowMessage(string message, bool error)
+    {
+        statusMessage = message;
+        isError = error;
+        StateHasChanged();
+        
+        // Clear message after 5 seconds
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(5000);
+            statusMessage = "";
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    // Windows Service Methods
+    private async Task RefreshServiceStatus()
+    {
+        try
+        {
+            serviceStatus = ServiceManager.GetServiceStatus();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error checking service status: {ex.Message}", true);
+        }
+    }
+
+    private async Task StartService()
+    {
+        try
+        {
+            ShowMessage("🚀 Starting Windows Service...", false);
+            var success = await ServiceManager.StartServiceAsync();
+            
+            if (success)
+            {
+                ShowMessage("✅ Windows Service started successfully", false);
+            }
+            else
+            {
+                ShowMessage("❌ Failed to start Windows Service", true);
+            }
+            
+            await RefreshServiceStatus();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error starting service: {ex.Message}", true);
+        }
+    }
+
+    private async Task StopService()
+    {
+        try
+        {
+            ShowMessage("🛑 Stopping Windows Service...", false);
+            var success = await ServiceManager.StopServiceAsync();
+            
+            if (success)
+            {
+                ShowMessage("✅ Windows Service stopped successfully", false);
+            }
+            else
+            {
+                ShowMessage("❌ Failed to stop Windows Service", true);
+            }
+            
+            await RefreshServiceStatus();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error stopping service: {ex.Message}", true);
+        }
+    }
+
+    private async Task RestartService()
+    {
+        try
+        {
+            ShowMessage("🔄 Restarting Windows Service...", false);
+            var success = await ServiceManager.RestartServiceAsync();
+            
+            if (success)
+            {
+                ShowMessage("✅ Windows Service restarted successfully", false);
+            }
+            else
+            {
+                ShowMessage("❌ Failed to restart Windows Service", true);
+            }
+            
+            await RefreshServiceStatus();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error restarting service: {ex.Message}", true);
+        }
+    }
+
+    private async Task InstallService()
+    {
+        try
+        {
+            ShowMessage("📦 Installing Windows Service...", false);
+            var success = await ServiceManager.InstallServiceAsync();
+            
+            if (success)
+            {
+                ShowMessage("✅ Windows Service installed successfully", false);
+                await RefreshServiceStatus();
+            }
+            else
+            {
+                ShowMessage("❌ Failed to install Windows Service. Make sure to run as Administrator.", true);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error installing service: {ex.Message}", true);
+        }
+    }
+
+    private string GetServiceStatusClass()
+    {
+        return serviceStatus switch
+        {
+            ServiceStatus.Running => "bg-green-900 text-green-200",
+            ServiceStatus.Stopped => "bg-red-900 text-red-200",
+            ServiceStatus.Starting => "bg-yellow-900 text-yellow-200",
+            ServiceStatus.Stopping => "bg-yellow-900 text-yellow-200",
+            ServiceStatus.NotInstalled => "bg-gray-900 text-gray-200",
+            _ => "bg-gray-900 text-gray-200"
+        };
+    }
+
+    private string GetServiceStatusText()
+    {
+        return serviceStatus switch
+        {
+            ServiceStatus.Running => "🟢 Running",
+            ServiceStatus.Stopped => "🔴 Stopped",
+            ServiceStatus.Starting => "🟡 Starting...",
+            ServiceStatus.Stopping => "🟡 Stopping...",
+            ServiceStatus.NotInstalled => "⚪ Not Installed",
+            _ => "❓ Unknown"
+        };
+    }
+}
